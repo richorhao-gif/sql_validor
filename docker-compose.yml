@@ -1,0 +1,121 @@
+# =====================================================================
+# SQL 变更校验智能体 — 本地开发环境
+#
+# 服务说明：
+#   postgres        — PostgreSQL 16（业务库），预置 Mock 数据仓库 Schema + 测试数据
+#   adminer         — 轻量级数据库 Web UI（可观测 DB 结构 / 执行查询）
+#   langfuse        — LLM/Agent 可观测平台（开源本地版，替代 LangSmith）
+#   langfuse-worker — LangFuse 后台任务处理进程
+#   langfuse-db     — LangFuse 专用 PostgreSQL（与业务库隔离）
+#   langfuse-redis  — LangFuse 任务队列
+#
+# 可观测能力：
+#   DB 层   ：Adminer      http://localhost:8080
+#              Server: postgres | User: validator | Password: validator123 | DB: dw_dev
+#   Agent 层：LangFuse     http://localhost:3000
+#              首次访问时注册账号，获取 Public/Secret Key 填入 .env
+#
+# 启动命令：
+#   docker compose --project-name sql-validator up -d
+#   docker compose --project-name sql-validator logs -f postgres   # 查看 DB 初始化日志
+#   docker compose --project-name sql-validator logs -f langfuse   # 查看 LangFuse 日志
+#   docker compose --project-name sql-validator down               # 停止（保留数据卷）
+#   docker compose --project-name sql-validator down -v            # 停止并清除所有数据
+# =====================================================================
+
+services:
+
+  # ── PostgreSQL 16（业务库）─────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: sql_validator_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: validator
+      POSTGRES_PASSWORD: validator123
+      POSTGRES_DB: dw_dev
+      # 确保中文字符正常存储
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # init.sql 在首次启动时自动执行
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U validator -d dw_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ── Adminer（DB 可观测 Web UI）────────────────────────────────────────
+  adminer:
+    image: adminer:4.8.1
+    container_name: sql_validator_adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # 默认登录表单预填服务名
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: lucas    # 简洁主题
+
+  # ══════════════════════════════════════════════════════════════════════
+  # LangFuse v2 —— 本地 LLM/Agent 可观测平台（替代 LangSmith）
+  # 访问地址：http://localhost:3000
+  # 首次访问注册账号 → Settings → API Keys → 获取 Public/Secret Key
+  # v2 版本仅依赖 PostgreSQL，无需 ClickHouse/Redis，适合本地开发
+  # ══════════════════════════════════════════════════════════════════════
+
+  # LangFuse 专用 PostgreSQL（与业务库完全隔离，避免端口/密码冲突）
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: sql_validator_langfuse_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse123
+      POSTGRES_DB: langfuse
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # LangFuse v2 Web 服务（包含 UI + API + Worker，单容器完整版）
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: sql_validator_langfuse
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse123@langfuse-db:5432/langfuse
+      # 固定密钥（本地开发用，生产环境务必替换为随机值）
+      NEXTAUTH_SECRET: local-dev-nextauth-secret-change-in-prod
+      SALT: local-dev-salt-change-in-prod
+      NEXTAUTH_URL: http://localhost:3000
+      # 允许本地注册账号
+      AUTH_DISABLE_SIGNUP: "false"
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+      # 关闭遥测（可选）
+      TELEMETRY_ENABLED: "false"
+
+volumes:
+  postgres_data:
+    name: sql_validator_postgres_data
+  langfuse_db_data:
+    name: sql_validator_langfuse_db_data
+
