@@ -71,9 +71,18 @@ def parse_sql_file(file: dict[str, Any]) -> tuple[ParsedScript, list[SyntaxIssue
         if stmt is None:
             continue
 
-        # sqlglot 解析告警（软错误）
-        for err in stmt.errors:
+        # sqlglot 解析告警（软错误）— 使用 error_messages() 方法而非不存在的 .errors 属性
+        try:
+            stmt_errors = list(stmt.error_messages())
+        except Exception:  # noqa: BLE001
+            stmt_errors = []
+
+        for err in stmt_errors:
             syntax_error_count += 1
+            try:
+                snippet = stmt.sql(dialect="postgres")[:300]
+            except Exception:  # noqa: BLE001
+                snippet = ""
             issues.append(
                 SyntaxIssue(
                     filename=filename,
@@ -81,7 +90,7 @@ def parse_sql_file(file: dict[str, Any]) -> tuple[ParsedScript, list[SyntaxIssue
                     category="SYNTAX",
                     rule="SYNTAX_ERROR",
                     message=str(err),
-                    sql_snippet=stmt.sql(dialect="postgres")[:300],
+                    sql_snippet=snippet,
                     suggestion="修复语法错误后重新提交",
                 )
             )
@@ -271,7 +280,10 @@ def _extract_statement_info(
 def _check_quality_rules(stmt: exp.Expression, filename: str) -> list[SyntaxIssue]:
     """对单条语句执行所有静态质量规则，返回发现的问题列表。"""
     issues: list[SyntaxIssue] = []
-    snippet = stmt.sql(dialect="postgres")[:300]
+    try:
+        snippet = stmt.sql(dialect="postgres")[:300]
+    except Exception:  # noqa: BLE001
+        snippet = ""
 
     # ── Rule: SELECT * ────────────────────────────────────────────────────────
     if isinstance(stmt, (exp.Select, exp.Insert)):

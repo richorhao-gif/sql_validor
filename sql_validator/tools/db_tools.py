@@ -76,7 +76,12 @@ def create_db_tools(dsn: str, llm: BaseChatModel) -> list[BaseTool]:
         QuerySQLCheckerTool,
     )
 
-    db = SQLDatabase.from_uri(dsn)
+    # SQLAlchemy 默认将 postgresql:// 映射到 psycopg2；
+    # 项目使用 psycopg3，需将 scheme 替换为 postgresql+psycopg://
+    sqlalchemy_dsn = dsn.replace("postgresql://", "postgresql+psycopg://", 1).replace(
+        "postgres://", "postgresql+psycopg://", 1
+    )
+    db = SQLDatabase.from_uri(sqlalchemy_dsn)
     toolkit = SQLDatabaseToolkit(db=db, llm=llm)
     all_tools = toolkit.get_tools()
 

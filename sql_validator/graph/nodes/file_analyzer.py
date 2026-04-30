@@ -70,6 +70,7 @@ def make_file_analyzer_node(llm: BaseChatModel):
             db_context = f"数据库中相关表: {', '.join(table_names)}"
 
         try:
+            print(f"    [file_analyzer] LLM 分析 {filename}……", flush=True)
             intent_prompt = FILE_INTENT_PROMPT.format(
                 filename=filename,
                 objects_created=script.objects_created or "无",

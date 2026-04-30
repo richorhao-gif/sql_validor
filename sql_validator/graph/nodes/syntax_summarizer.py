@@ -57,7 +57,11 @@ def make_syntax_summarizer_node(llm: BaseChatModel):
                 "请填写 top_issues（最重要的3-5条问题摘要，每条≤50字）"
                 "和 recommendations（3-5条改进建议，每条≤80字）。"
                 "quality_score、error_count、warning_count、info_count、"
-                f"files_with_errors 已计算好，直接填入即可。"
+                f"files_with_errors 已计算好，直接填入即可：\n"
+                f"  quality_score={quality_score}, error_count={error_count}, "
+                f"warning_count={warning_count}, info_count={info_count}, "
+                f"files_with_errors={files_with_errors}（字符串列表）。\n"
+                "请以 json 格式输出结果。"
             )
             result: SyntaxAnalysisSummary = structured_llm.invoke(summary_prompt)
             result = result.model_copy(update={

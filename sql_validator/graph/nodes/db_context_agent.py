@@ -49,17 +49,34 @@ def make_db_context_agent_node(
         if not messages:
             return {"errors": ["db_context_agent: 未找到初始消息，跳过 DB 查询"]}
 
-        # 调用 ReAct Agent
+        # 调用 ReAct Agent，用 stream(values) 实时打印进度，最后一个 chunk 即完整状态
         try:
-            result = react_agent.invoke({"messages": messages})
+            final_result: dict = {}
+            step = 0
+            for chunk in react_agent.stream(
+                {"messages": messages}, stream_mode="values"
+            ):
+                final_result = chunk
+                # 取本轮新增的最后一条消息做进度提示
+                latest = (chunk.get("messages") or [])[-1] if chunk.get("messages") else None
+                if latest is not None:
+                    step += 1
+                    label = type(latest).__name__
+                    if hasattr(latest, "tool_calls") and latest.tool_calls:
+                        hint = f"调用工具: {latest.tool_calls[0].get('name', '?')}"
+                    elif hasattr(latest, "content") and isinstance(latest.content, str):
+                        hint = latest.content[:80].replace("\n", " ")
+                    else:
+                        hint = ""
+                    if hint:
+                        print(f"    [db_context step {step}] {label}: {hint}", flush=True)
         except Exception as exc:  # noqa: BLE001
             return {
                 "errors": [f"db_context_agent ReAct 调用失败: {exc}"],
                 "db_snapshot": DBSnapshot().model_dump(),
             }
 
-        # 提取 Agent 产出的所有消息文本
-        agent_msgs: list[BaseMessage] = result.get("messages", [])
+        agent_msgs: list[BaseMessage] = final_result.get("messages", [])
         conversation_text = "\n\n".join(
             f"[{type(m).__name__}]: {m.content}"
             for m in agent_msgs
@@ -67,12 +84,14 @@ def make_db_context_agent_node(
         )
 
         # 用结构化 LLM 从对话文本中提取 DBSnapshot
+        print("    [db_context] 提取结构化 DBSnapshot……", flush=True)
         try:
             snapshot: DBSnapshot = structured_llm.invoke(
                 DB_SNAPSHOT_EXTRACTION_PROMPT.format(
                     agent_conversation=conversation_text[:8000]  # 防止超 Token
                 )
             )
+            print("    [db_context] DBSnapshot 提取完成", flush=True)
         except Exception as exc:  # noqa: BLE001
             return {
                 "errors": [f"DBSnapshot 结构化提取失败: {exc}"],

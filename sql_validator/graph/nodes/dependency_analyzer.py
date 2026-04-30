@@ -58,8 +58,9 @@ def make_dependency_analyzer_node(llm: BaseChatModel):
                 }
             )
         except Exception as exc:  # noqa: BLE001
+            computed_without_notes = {k: v for k, v in computed.items() if k != "analysis_notes"}
             dep_graph = DependencyGraph(
-                **computed,
+                **computed_without_notes,
                 analysis_notes=f"LLM 分析失败（{exc}），已使用算法结果",
             )
 

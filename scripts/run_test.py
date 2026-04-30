@@ -251,13 +251,26 @@ def main() -> None:
             change_description=request.change_description,
         )
 
-        print(_c("  图执行中，请稍候……", _Colors.GREY))
+        print(_c("  图执行中，逐节点输出进度……", _Colors.GREY))
         from sql_validator.entrypoint import _get_langfuse_callback
         langfuse_cb = _get_langfuse_callback()
         if langfuse_cb:
             _ok(f"LangFuse 追踪已启用 → {settings.postgres_dsn[:10]}... (见 http://localhost:3000)")
         invoke_config = {"callbacks": [langfuse_cb]} if langfuse_cb else {}
-        final_state = graph.invoke(initial_state, config=invoke_config)
+
+        final_state: dict = {}
+        for chunk in graph.stream(initial_state, config=invoke_config, stream_mode="updates"):
+            for node_name, node_output in chunk.items():
+                node_errors = node_output.get("errors") if isinstance(node_output, dict) else []
+                status = _c("✘", _Colors.RED) if node_errors else _c("✔", _Colors.GREEN)
+                _info(f"  {status} {node_name}（{time.time()-t_start:.1f}s）")
+                if node_errors:
+                    for e in node_errors:
+                        _warn(f"    └ {e}")
+            if isinstance(chunk, dict):
+                for v in chunk.values():
+                    if isinstance(v, dict):
+                        final_state.update(v)
         elapsed = time.time() - t_start
 
     except KeyboardInterrupt:

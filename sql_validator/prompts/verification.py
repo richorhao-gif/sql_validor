@@ -41,4 +41,9 @@ risk_level 判定参考：
 - HIGH：有无 WHERE 条件的全表 UPDATE/DELETE
 - MEDIUM：有 extra_items 或部分 missing_items
 - LOW：全部对应，仅有轻微描述差异
+
+confidence：你对本次审核结论的置信度，0-100 的整数。
+analysis_notes：对比分析的详细说明文字，用中文描述核心发现。
+
+请以 json 格式输出结果。
 """
