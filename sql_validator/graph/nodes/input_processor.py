@@ -46,5 +46,6 @@ def input_processor(state: SQLValidationState) -> dict:
 
     return {
         "messages": [init_message],
+        "object_names": object_names,
         "errors": errors,
     }

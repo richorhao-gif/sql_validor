@@ -43,6 +43,8 @@ class DBTable(BaseModel):
     primary_keys: list[str] = Field(default_factory=list)
     foreign_keys: list[DBForeignKey] = Field(default_factory=list)
     indexes: list[DBIndex] = Field(default_factory=list)
+    storage_engine: str | None = Field(default=None, description="存储引擎，如 heap / beam")
+    table_comment: str | None = None
 
     @property
     def column_names(self) -> list[str]:
@@ -56,6 +58,32 @@ class DBView(BaseModel):
     view_name: str
     full_name: str
     view_definition: str | None = None
+    view_options: str | None = Field(
+        default=None,
+        description="视图选项，如 security_invoker=true / security_barrier=true",
+    )
+
+
+class DBForeignTable(BaseModel):
+    """FOREIGN TABLE（外部表）信息，包含 SERVER 和 OSS OPTIONS。"""
+
+    schema_name: str
+    table_name: str
+    full_name: str
+    server_name: str | None = None
+    oss_options: dict[str, str] = Field(
+        default_factory=dict,
+        description="外部表选项，如 prefix / format / delimiter",
+    )
+    columns: list[DBColumn] = Field(default_factory=list)
+
+
+class DBDownstreamDep(BaseModel):
+    """某个对象的下游依赖条目（谁依赖了它）。"""
+
+    dependent_schema: str
+    dependent_object: str
+    dependent_type: str = Field(description="table | view | foreign_table | materialized_view")
 
 
 class DBRoutine(BaseModel):
@@ -75,9 +103,17 @@ class DBSnapshot(BaseModel):
 
     tables: dict[str, DBTable] = Field(default_factory=dict)
     views: dict[str, DBView] = Field(default_factory=dict)
+    foreign_tables: dict[str, DBForeignTable] = Field(
+        default_factory=dict,
+        description="FOREIGN TABLE 快照，key 为 schema.table_name",
+    )
+    downstream_deps: dict[str, list[DBDownstreamDep]] = Field(
+        default_factory=dict,
+        description="下游依赖映射，key 为被依赖对象的全限定名",
+    )
     routines: dict[str, DBRoutine] = Field(default_factory=dict)
     available_schemas: list[str] = Field(default_factory=list)
     agent_query_notes: str = Field(
         default="",
-        description="Agent 记录的查询过程说明（追查了哪些隐式依赖、外键等）",
+        description="Agent 记录的查询过程说明（追查了哪些隐式依赖、外键、OSS 配置等）",
     )

@@ -66,7 +66,7 @@ def run_validation(request: ValidationRequest) -> ValidationResult:
 
     # 构建 LLM 和 DB 工具
     llm = settings.create_llm()
-    db_tools = create_db_tools(dsn=settings.postgres_dsn, llm=llm)
+    db_tools = create_db_tools(dsn=settings.postgres_dsn)
 
     # 构建并编译图
     graph = build_graph(

@@ -1,4 +1,16 @@
--- =====================================================================
+#!/usr/bin/env python3
+"""
+scripts/reset_db_fixtures.py
+将 docker/init.sql 替换为调味品供应链多 Schema 复杂测试场景。
+运行后需要重启 Docker volume 使其生效：
+    docker compose --project-name sql-validator down -v
+    docker compose --project-name sql-validator up -d
+"""
+from pathlib import Path
+
+ROOT = Path(__file__).parent.parent
+
+INIT_SQL = r"""-- =====================================================================
 -- sql_validator — 调味品供应链数仓 Mock 初始化脚本
 -- 模拟生产环境 DS→ODS→DWD→DA→BI 五层架构的当前状态
 --
@@ -345,3 +357,7 @@ BEGIN
     RAISE NOTICE '========================================';
 END;
 $$;
+"""
+
+(ROOT / "docker" / "init.sql").write_text(INIT_SQL.lstrip(), encoding="utf-8")
+print(f"✔ docker/init.sql 已更新（{len(INIT_SQL.splitlines())} 行）")

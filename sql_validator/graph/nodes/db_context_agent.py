@@ -3,9 +3,9 @@ graph/nodes/db_context_agent.py
 ────────────────────────────────
 构建 db_context_agent 节点的工厂函数。
 
-内部使用 create_react_agent 创建 ReAct 子图，装备只读 SQLDatabaseToolkit。
-Agent 自主决定查询哪些对象，追查外键、隐式依赖等。
-最终将 Agent 的探查结果转换为结构化的 DBSnapshot。
+内部使用 create_react_agent 创建 ReAct 子图，装备 psycopg 原生工具集（13 个工具）。
+Agent 按固定探查步骤自主查询，覆盖普通表/视图/外部表/下游依赖/PG专有特性。
+最终将探查结果转换为结构化的 DBSnapshot，并通过 set diff 校验覆盖完整性。
 """
 from __future__ import annotations
 
@@ -14,7 +14,10 @@ from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
-from sql_validator.prompts.db_context import DB_SNAPSHOT_EXTRACTION_PROMPT
+from sql_validator.prompts.db_context import (
+    DB_CONTEXT_SYSTEM_PROMPT,
+    DB_SNAPSHOT_EXTRACTION_PROMPT,
+)
 from sql_validator.schemas.db_context import DBSnapshot
 from sql_validator.graph.state import SQLValidationState
 
@@ -30,12 +33,15 @@ def make_db_context_agent_node(
         llm: 已配置的 ChatModel 实例
         db_tools: create_db_tools() 返回的只读工具列表
     """
+    from langchain_core.messages import SystemMessage
     from langgraph.prebuilt import create_react_agent
 
     # ReAct 子图（无 checkpointer，由主图管理持久化）
+    # 注入系统 Prompt，强制 Agent 按探查步骤执行并覆盖所有对象
     react_agent = create_react_agent(
         model=llm,
         tools=db_tools,
+        prompt=SystemMessage(content=DB_CONTEXT_SYSTEM_PROMPT),
     )
 
     # 用于最终结构化提取的绑定模型
@@ -102,6 +108,31 @@ def make_db_context_agent_node(
                 ).model_dump(),
                 "messages": agent_msgs,
             }
+
+        # ── set diff 快照完整性校验 ──────────────────────────────────────────
+        # input_processor 已将 object_names 写入 state，做确定性兜底校验
+        expected_objects: set[str] = set(state.get("object_names", []))
+        if expected_objects:
+            actual_objects: set[str] = (
+                set(snapshot.tables.keys())
+                | set(snapshot.views.keys())
+                | set(snapshot.foreign_tables.keys())
+            )
+            missing = expected_objects - actual_objects
+            if missing:
+                missing_str = ", ".join(sorted(missing))
+                print(
+                    f"    [db_context] ⚠ 快照不完整，以下对象未被覆盖: {missing_str}",
+                    flush=True,
+                )
+                # 追加到 agent_query_notes，不阻断流程
+                updated_notes = (
+                    snapshot.agent_query_notes
+                    + f"\n\n[完整性警告] 以下对象在快照中缺失（可能为本次新建）: {missing_str}"
+                )
+                snapshot = snapshot.model_copy(
+                    update={"agent_query_notes": updated_notes}
+                )
 
         return {
             "db_snapshot": snapshot.model_dump(),

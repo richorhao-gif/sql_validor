@@ -67,19 +67,24 @@ def _info(msg: str) -> None: print(_c(f"     {msg}", _Colors.GREY))
 FIXTURES_DIR = ROOT / "tests" / "fixtures"
 
 FIXTURE_FILES = [
-    "01_alter_dim_user_level_add_discount.sql",
-    "02_create_fact_user_daily_summary.sql",
-    "03_create_view_vw_user_level_revenue.sql",
+    "01_sauce_mat_brd_prdct_atribt_redeploy.sql",
+    "02_sauce_mat_abbr_add_column.sql",
+    "03_sauce_mat_variety_new_asset.sql",
 ]
 
 CHANGE_DESCRIPTION = (
-    "本次发版共 3 个 SQL 脚本：\n"
-    "① 为用户等级维度表(dim_user_level)新增 discount_rate 折扣率字段，并初始化各等级折扣值；\n"
-    "② 新建用户每日汇总宽表 fact_user_daily_summary，"
-    "依赖现有维度表 dim_user_level 和 dim_date；\n"
-    "③ 新建视图 vw_user_level_revenue，引用脚本①新增的 discount_rate 字段，"
-    "依赖现有的 fact_orders 和 dim_user_level。\n"
-    "注意：脚本③必须在脚本①之后执行（存在跨脚本字段依赖）。"
+    "本次发版共 3 个 SQL 脚本，涉及供应链域调味品板块 3 个数据资产：\n"
+    "① 调味物料品种与产品属性（sauce_mat_brd_prdct_atribt）全链路重建：\n"
+    "   新增 is_rawmat（是否原料）和 prdct_atribt（产品属性）两列，\n"
+    "   DS→ODS→DWD→DA→BI 所有层全部 DROP+CREATE 重建；\n"
+    "   影响下游：da.v_da_sauce_material_full 和 da_selfhp 两个视图需随之重建。\n"
+    "② 调味物料简称（sauce_mat_abbr）全链路新增 mat_abbr_short（物料短简称）列：\n"
+    "   DS 层重建 FOREIGN TABLE，ODS/DWD/DA 层 ALTER 追加列，BI 视图同步重建；\n"
+    "   与脚本①无执行顺序依赖，但共用同一 oss_serv。\n"
+    "③ 调味品品种（sauce_mat_variety）全新资产创建：\n"
+    "   从零建立 DS→ODS→DWD→DA→BI 完整链路，库中当前不存在同名对象；\n"
+    "   共用 oss_serv OSS Server（该 Server 已被①②使用，需确认 Server 状态）。\n"
+    "执行顺序：脚本①②③均可独立执行，无跨脚本字段依赖。"
 )
 
 
@@ -243,7 +248,7 @@ def main() -> None:
         from sql_validator.tools.db_tools import create_db_tools
 
         llm      = settings.create_llm()
-        db_tools = create_db_tools(dsn=settings.postgres_dsn, llm=llm)
+        db_tools = create_db_tools(dsn=settings.postgres_dsn)
         graph    = build_graph(llm=llm, db_tools=db_tools, output_dir=settings.output_dir)
 
         initial_state = make_initial_state(
