@@ -9,6 +9,7 @@ graph/nodes/dependency_analyzer.py
 from __future__ import annotations
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 
 from sql_validator.core.dependency import build_dependency_graph
 from sql_validator.core.report_builder import format_scripts_summary
@@ -22,7 +23,7 @@ def make_dependency_analyzer_node(llm: BaseChatModel):
 
     structured_llm = llm.with_structured_output(DependencyGraph)
 
-    def dependency_analyzer(state: SQLValidationState) -> dict:
+    def dependency_analyzer(state: SQLValidationState, config: RunnableConfig) -> dict:
         parsed_scripts: list[dict] = state.get("parsed_scripts", [])
 
         if not parsed_scripts:
@@ -45,7 +46,7 @@ def make_dependency_analyzer_node(llm: BaseChatModel):
                 scripts_summary=scripts_summary,
                 computed_order=computed_order_str,
             )
-            dep_graph: DependencyGraph = structured_llm.invoke(prompt)
+            dep_graph: DependencyGraph = structured_llm.invoke(prompt, config=config)
 
             # 以算法结果为准，LLM 只覆盖 analysis_notes（避免 LLM 乱改执行顺序）
             dep_graph = dep_graph.model_copy(

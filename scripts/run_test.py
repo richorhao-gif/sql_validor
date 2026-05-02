@@ -273,6 +273,16 @@ def main() -> None:
                         final_state.update(v)
         elapsed = time.time() - t_start
 
+        # Langfuse v3 异步批量上报，进程退出前必须显式 flush，否则队列丢失
+        # v3 的 flush/shutdown 在客户端单例上，不在 handler 上
+        if langfuse_cb:
+            try:
+                from langfuse import get_client
+                get_client().flush()
+                _ok("Langfuse 追踪数据已上报完毕")
+            except Exception as _lf_exc:
+                _warn(f"Langfuse flush 失败（不影响主流程）: {_lf_exc}")
+
     except KeyboardInterrupt:
         _warn("用户中断执行")
         sys.exit(130)

@@ -6,6 +6,7 @@ graph/nodes/change_verifier.py
 from __future__ import annotations
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 
 from sql_validator.core.report_builder import (
     format_changes_detail,
@@ -21,7 +22,7 @@ def make_change_verifier_node(llm: BaseChatModel):
 
     structured_llm = llm.with_structured_output(ChangeVerificationResult)
 
-    def change_verifier(state: SQLValidationState) -> dict:
+    def change_verifier(state: SQLValidationState, config: RunnableConfig) -> dict:
         change_description: str = state.get("change_description", "")
         db_impact: dict | None = state.get("db_impact")
 
@@ -43,7 +44,7 @@ def make_change_verifier_node(llm: BaseChatModel):
                 db_impact_summary=db_impact_summary,
                 changes_detail=changes_detail,
             )
-            result: ChangeVerificationResult = structured_llm.invoke(prompt)
+            result: ChangeVerificationResult = structured_llm.invoke(prompt, config=config)
         except Exception as exc:  # noqa: BLE001
             result = ChangeVerificationResult(
                 verdict="FAIL",

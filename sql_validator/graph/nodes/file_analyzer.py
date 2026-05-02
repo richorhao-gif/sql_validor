@@ -13,6 +13,7 @@ graph/nodes/file_analyzer.py
 from __future__ import annotations
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 from pydantic import ValidationError
 
 from sql_validator.core.db_comparator import compare_against_snapshot
@@ -31,7 +32,7 @@ def make_file_analyzer_node(llm: BaseChatModel):
         llm: 已配置的 ChatModel 实例（用于生成 intent_summary）
     """
 
-    def file_analyzer(state: FileAnalyzerInput) -> dict:
+    def file_analyzer(state: FileAnalyzerInput, config: RunnableConfig) -> dict:
         """处理单个 SQL 文件，返回解析结果和问题列表（追加到主图状态）。"""
         file_dict: dict = state["file"]
         snapshot_dict: dict | None = state.get("db_snapshot")
@@ -81,7 +82,7 @@ def make_file_analyzer_node(llm: BaseChatModel):
                 statements_preview=statements_preview or "（无语句）",
                 db_context=db_context,
             )
-            response = llm.invoke(intent_prompt)
+            response = llm.invoke(intent_prompt, config=config)
             intent_text = response.content if hasattr(response, "content") else str(response)
             script = script.model_copy(update={"intent_summary": intent_text.strip()[:300]})
         except Exception as exc:  # noqa: BLE001

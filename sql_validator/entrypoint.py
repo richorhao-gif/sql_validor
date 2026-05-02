@@ -16,8 +16,6 @@ entrypoint.py
 """
 from __future__ import annotations
 
-import os
-
 from sql_validator.config.settings import get_settings
 from sql_validator.graph.builder import build_graph
 from sql_validator.graph.state import make_initial_state
@@ -25,25 +23,27 @@ from sql_validator.schemas.inputs import ValidationRequest, ValidationResult
 from sql_validator.tools.db_tools import create_db_tools
 
 
-def _get_langfuse_callback():
+def _get_langfuse_callback(settings=None):
     """
     若 .env 中配置了 LANGFUSE_* 变量，返回 LangFuse CallbackHandler；否则返回 None。
     LangFuse 是开源本地可观测平台（替代 LangSmith），需在 docker-compose.yml 中启动。
     """
-    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
-    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
-    host       = os.getenv("LANGFUSE_HOST", "http://localhost:3000")
+    if settings is None:
+        settings = get_settings()
+
+    public_key = settings.langfuse_public_key
+    secret_key = settings.langfuse_secret_key
+    host       = settings.langfuse_host
 
     if not public_key or public_key.startswith("pk-lf-xxx"):
         return None
 
     try:
-        from langfuse.callback import CallbackHandler  # type: ignore[import-untyped]
-        return CallbackHandler(
-            public_key=public_key,
-            secret_key=secret_key,
-            host=host,
-        )
+        # langfuse v3 SDK：先初始化单例客户端，再创建 CallbackHandler
+        from langfuse import Langfuse  # type: ignore[import-untyped]
+        from langfuse.langchain import CallbackHandler  # type: ignore[import-untyped]
+        Langfuse(public_key=public_key, secret_key=secret_key, host=host)
+        return CallbackHandler()
     except ImportError:
         # langfuse 包未安装时静默跳过，不影响主流程
         return None

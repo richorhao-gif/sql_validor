@@ -6,6 +6,7 @@ graph/nodes/syntax_summarizer.py
 from __future__ import annotations
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 
 from sql_validator.core.db_comparator import compute_quality_score
 from sql_validator.core.report_builder import format_file_stats, format_issues_for_summary
@@ -19,7 +20,7 @@ def make_syntax_summarizer_node(llm: BaseChatModel):
 
     structured_llm = llm.with_structured_output(SyntaxAnalysisSummary)
 
-    def syntax_summarizer(state: SQLValidationState) -> dict:
+    def syntax_summarizer(state: SQLValidationState, config: RunnableConfig) -> dict:
         issues: list[dict] = state.get("raw_syntax_issues", [])
         parsed_scripts: list[dict] = state.get("parsed_scripts", [])
         file_list = [s["filename"] for s in parsed_scripts]
@@ -63,7 +64,7 @@ def make_syntax_summarizer_node(llm: BaseChatModel):
                 f"files_with_errors={files_with_errors}（字符串列表）。\n"
                 "请以 json 格式输出结果。"
             )
-            result: SyntaxAnalysisSummary = structured_llm.invoke(summary_prompt)
+            result: SyntaxAnalysisSummary = structured_llm.invoke(summary_prompt, config=config)
             result = result.model_copy(update={
                 "error_count": error_count,
                 "warning_count": warning_count,

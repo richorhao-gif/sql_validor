@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     )
     output_dir: str = Field(default="./reports", description="MD 报告输出目录")
 
+    # ── Observability: Langfuse ────────────────────────────────────────────
+    langfuse_public_key: str = Field(default="", description="Langfuse Public Key")
+    langfuse_secret_key: str = Field(default="", description="Langfuse Secret Key")
+    langfuse_host: str = Field(default="http://localhost:3000", description="Langfuse Host URL")
+
     # ── Validators ─────────────────────────────────────────────────────────
 
     @field_validator("postgres_dsn")

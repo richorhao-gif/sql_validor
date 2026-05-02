@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 
 from sql_validator.core.report_builder import format_scripts_summary
 from sql_validator.graph.state import SQLValidationState
@@ -22,7 +23,7 @@ def make_db_impact_analyzer_node(llm: BaseChatModel):
 
     structured_llm = llm.with_structured_output(DBImpactAnalysis)
 
-    def db_impact_analyzer(state: SQLValidationState) -> dict:
+    def db_impact_analyzer(state: SQLValidationState, config: RunnableConfig) -> dict:
         parsed_scripts: list[dict] = state.get("parsed_scripts", [])
         dep_graph: dict | None = state.get("dependency_graph")
         snapshot: dict | None = state.get("db_snapshot")
@@ -53,7 +54,7 @@ def make_db_impact_analyzer_node(llm: BaseChatModel):
                 scripts_summary=scripts_summary,
                 db_snapshot_summary=db_snapshot_summary,
             )
-            impact: DBImpactAnalysis = structured_llm.invoke(prompt)
+            impact: DBImpactAnalysis = structured_llm.invoke(prompt, config=config)
             # 确保 execution_sequence 与算法结果一致
             impact = impact.model_copy(update={"execution_sequence": execution_order})
         except Exception as exc:  # noqa: BLE001

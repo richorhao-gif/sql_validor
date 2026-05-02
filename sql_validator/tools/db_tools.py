@@ -60,11 +60,10 @@ def create_db_tools(dsn: str, llm: BaseChatModel) -> list[BaseTool]:
       - sql_db_list_tables  : 列出数据库所有表
       - sql_db_schema       : 获取指定表的 DDL 和列信息
       - sql_db_query        : 安全只读查询（SafeQueryTool 包装）
-      - sql_db_query_checker: 执行前语法检查
 
     Args:
         dsn: PostgreSQL 连接字符串
-        llm: 用于 query_checker 的 LLM 实例
+        llm: LLM 实例（toolkit 内部使用，保持接口兼容）
 
     Returns:
         工具列表，可直接传入 create_react_agent
@@ -73,7 +72,6 @@ def create_db_tools(dsn: str, llm: BaseChatModel) -> list[BaseTool]:
     from langchain_community.tools.sql_database.tool import (
         InfoSQLDatabaseTool,
         ListSQLDatabaseTool,
-        QuerySQLCheckerTool,
     )
 
     # SQLAlchemy 默认将 postgresql:// 映射到 psycopg2；
@@ -85,13 +83,12 @@ def create_db_tools(dsn: str, llm: BaseChatModel) -> list[BaseTool]:
     toolkit = SQLDatabaseToolkit(db=db, llm=llm)
     all_tools = toolkit.get_tools()
 
-    # 按类型筛选并替换查询工具为安全版本
+    # 按类型筛选：SafeQueryTool 替换查询工具，排除 checker 和写工具
     result: list[BaseTool] = []
     for t in all_tools:
         if isinstance(t, QuerySQLDataBaseTool):
             result.append(SafeQueryTool(inner=t))
-        elif isinstance(t, (ListSQLDatabaseTool, InfoSQLDatabaseTool, QuerySQLCheckerTool)):
+        elif isinstance(t, (ListSQLDatabaseTool, InfoSQLDatabaseTool)):
             result.append(t)
-        # 其余工具（如写工具）一律丢弃
 
     return result

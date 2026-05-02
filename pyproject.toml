@@ -22,7 +22,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
     "ipykernel>=6",
-    "langfuse>=2",     # 本地可观测（配合 docker-compose 中的 LangFuse 服务）
+    "langfuse>=3,<4",     # 本地可观测（配合 docker-compose 中的 LangFuse v3 服务）
 ]
 
 [build-system]

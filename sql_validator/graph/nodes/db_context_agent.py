@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 
 from sql_validator.prompts.db_context import DB_SNAPSHOT_EXTRACTION_PROMPT
@@ -40,7 +41,7 @@ def make_db_context_agent_node(
     # 用于最终结构化提取的绑定模型
     structured_llm = llm.with_structured_output(DBSnapshot)
 
-    def db_context_agent(state: SQLValidationState) -> dict:
+    def db_context_agent(state: SQLValidationState, config: RunnableConfig) -> dict:
         """
         调用 ReAct 子图探查数据库，然后用结构化输出提取 DBSnapshot。
         """
@@ -54,7 +55,7 @@ def make_db_context_agent_node(
             final_result: dict = {}
             step = 0
             for chunk in react_agent.stream(
-                {"messages": messages}, stream_mode="values"
+                {"messages": messages}, config=config, stream_mode="values"
             ):
                 final_result = chunk
                 # 取本轮新增的最后一条消息做进度提示
@@ -89,7 +90,8 @@ def make_db_context_agent_node(
             snapshot: DBSnapshot = structured_llm.invoke(
                 DB_SNAPSHOT_EXTRACTION_PROMPT.format(
                     agent_conversation=conversation_text[:8000]  # 防止超 Token
-                )
+                ),
+                config=config,
             )
             print("    [db_context] DBSnapshot 提取完成", flush=True)
         except Exception as exc:  # noqa: BLE001
