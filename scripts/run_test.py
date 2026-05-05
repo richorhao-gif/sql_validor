@@ -224,9 +224,9 @@ def main() -> None:
 
     # ── 构造请求 ─────────────────────────────────────────────────────────────
     _section("启动智能体校验流程")
-    _info("节点路由：input_processor → db_context_agent → file_analyzer×N")
-    _info("         → dependency_analyzer → db_impact_analyzer")
-    _info("         → [change_verifier ∥ syntax_summarizer] → report_generator")
+    _info("节点路由：input_processor ─┬─ db_context_agent → file_analyzer×N")
+    _info("         syntax_chain    ├─ syntax_file_worker×N → syntax_summarizer → END")
+    _info("         main chain      └─ dependency_analyzer → db_impact_analyzer → change_verifier → END")
     print()
 
     try:
@@ -307,8 +307,8 @@ def main() -> None:
             verdict            = change_verif.get("verdict", "FAIL"),
             risk_level         = change_verif.get("risk_level", "HIGH"),
             summary            = change_verif.get("analysis_notes", ""),
-            change_report_path = final_state.get("change_report_md", "（未生成）"),
-            syntax_report_path = final_state.get("syntax_report_md", "（未生成）"),
+            change_report_path = final_state.get("change_report_path", "（未生成）"),
+            syntax_report_path = final_state.get("syntax_report_path", "（未生成）"),
         )
     except Exception:
         # ValidationResult 字段可能与实际不同，回退到简单打印
@@ -316,8 +316,8 @@ def main() -> None:
             "verdict":            final_state.get("change_verification", {}).get("verdict", "?"),
             "risk_level":         final_state.get("change_verification", {}).get("risk_level", "?"),
             "summary":            "",
-            "change_report_path": final_state.get("change_report_md", ""),
-            "syntax_report_path": final_state.get("syntax_report_md", ""),
+            "change_report_path": final_state.get("change_report_path", "（未生成）"),
+            "syntax_report_path": final_state.get("syntax_report_path", "（未生成）"),
         })()
 
     print_result(result, final_state, args.verbose, elapsed)

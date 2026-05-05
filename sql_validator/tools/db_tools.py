@@ -339,27 +339,26 @@ def create_db_tools(dsn: str) -> list[BaseTool]:
         """
         rows = _query(dsn, """
             SELECT DISTINCT
-                dep_n.nspname   AS dependent_schema,
-                dep_c.relname   AS dependent_object,
-                CASE dep_c.relkind
-                    WHEN 'r' THEN 'table'
+                vn.nspname  AS dependent_schema,
+                vc.relname  AS dependent_object,
+                CASE vc.relkind
                     WHEN 'v' THEN 'view'
-                    WHEN 'f' THEN 'foreign_table'
                     WHEN 'm' THEN 'materialized_view'
-                    ELSE dep_c.relkind::text
-                END             AS dependent_type,
-                d.deptype       AS dep_type_code
-            FROM pg_catalog.pg_depend      d
-            JOIN pg_catalog.pg_class       obj_c  ON obj_c.oid  = d.refobjid
-            JOIN pg_catalog.pg_namespace   obj_n  ON obj_n.oid  = obj_c.relnamespace
-            JOIN pg_catalog.pg_class       dep_c  ON dep_c.oid  = d.objid
-            JOIN pg_catalog.pg_namespace   dep_n  ON dep_n.oid  = dep_c.relnamespace
-            WHERE obj_n.nspname = %s
-              AND obj_c.relname = %s
-              AND d.deptype IN ('n','a')
-              AND dep_c.relkind IN ('r','v','f','m')
-              AND dep_c.oid <> obj_c.oid
-            ORDER BY dep_n.nspname, dep_c.relname
+                    WHEN 'r' THEN 'table'
+                    ELSE vc.relkind::text
+                END         AS dependent_type
+            FROM pg_catalog.pg_rewrite     r
+            JOIN pg_catalog.pg_class       vc   ON vc.oid  = r.ev_class
+            JOIN pg_catalog.pg_namespace   vn   ON vn.oid  = vc.relnamespace
+            JOIN pg_catalog.pg_depend      d    ON d.objid = r.oid
+            JOIN pg_catalog.pg_class       ref  ON ref.oid = d.refobjid
+            JOIN pg_catalog.pg_namespace   refn ON refn.oid = ref.relnamespace
+            WHERE refn.nspname = %s
+              AND ref.relname  = %s
+              AND d.deptype    = 'n'
+              AND vc.relkind  IN ('v','m')
+              AND vc.oid      <> ref.oid
+            ORDER BY vn.nspname, vc.relname
         """, (schema, obj))
         return _fmt(rows) if rows else json.dumps(
             {"message": f"{schema}.{obj} 没有发现下游依赖对象"}, ensure_ascii=False
@@ -376,25 +375,27 @@ def create_db_tools(dsn: str) -> list[BaseTool]:
         """
         rows = _query(dsn, """
             SELECT DISTINCT
-                ref_n.nspname   AS ref_schema,
-                ref_c.relname   AS ref_object,
-                CASE ref_c.relkind
+                refn.nspname  AS ref_schema,
+                ref.relname   AS ref_object,
+                CASE ref.relkind
                     WHEN 'r' THEN 'table'
                     WHEN 'v' THEN 'view'
                     WHEN 'f' THEN 'foreign_table'
-                    ELSE ref_c.relkind::text
-                END             AS ref_type
-            FROM pg_catalog.pg_depend      d
-            JOIN pg_catalog.pg_class       obj_c  ON obj_c.oid  = d.objid
-            JOIN pg_catalog.pg_namespace   obj_n  ON obj_n.oid  = obj_c.relnamespace
-            JOIN pg_catalog.pg_class       ref_c  ON ref_c.oid  = d.refobjid
-            JOIN pg_catalog.pg_namespace   ref_n  ON ref_n.oid  = ref_c.relnamespace
-            WHERE obj_n.nspname = %s
-              AND obj_c.relname = %s
-              AND d.deptype IN ('n','a')
-              AND ref_c.relkind IN ('r','v','f','m')
-              AND ref_c.oid <> obj_c.oid
-            ORDER BY ref_n.nspname, ref_c.relname
+                    WHEN 'm' THEN 'materialized_view'
+                    ELSE ref.relkind::text
+                END           AS ref_type
+            FROM pg_catalog.pg_rewrite     r
+            JOIN pg_catalog.pg_class       vc   ON vc.oid  = r.ev_class
+            JOIN pg_catalog.pg_namespace   vn   ON vn.oid  = vc.relnamespace
+            JOIN pg_catalog.pg_depend      d    ON d.objid = r.oid
+            JOIN pg_catalog.pg_class       ref  ON ref.oid = d.refobjid
+            JOIN pg_catalog.pg_namespace   refn ON refn.oid = ref.relnamespace
+            WHERE vn.nspname = %s
+              AND vc.relname = %s
+              AND d.deptype  = 'n'
+              AND ref.relkind IN ('r','v','f','m')
+              AND ref.oid   <> vc.oid
+            ORDER BY refn.nspname, ref.relname
         """, (schema, obj))
         return _fmt(rows) if rows else json.dumps(
             {"message": f"{schema}.{obj} 没有发现上游依赖"}, ensure_ascii=False
@@ -412,7 +413,7 @@ def create_db_tools(dsn: str) -> list[BaseTool]:
             SELECT
                 n.nspname       AS schema_name,
                 c.relname       AS table_name,
-                pg_catalog.pg_options_to_table(ft.ftoptions) AS options_kv
+                ft.ftoptions    AS ftoptions
             FROM pg_catalog.pg_foreign_table  ft
             JOIN pg_catalog.pg_class          c  ON c.oid  = ft.ftrelid
             JOIN pg_catalog.pg_namespace      n  ON n.oid  = c.relnamespace
@@ -587,9 +588,13 @@ def create_db_tools(dsn: str) -> list[BaseTool]:
           - where_clause 不能为空，防止全表扫描
           - 结果最多返回 100 行
 
+        ⚠️ 重要：where_clause 必须是静态字符串，直接把值写进去，
+        例如 "nspname = 'ods' AND relname = 'my_table'"。
+        禁止使用任何占位符（%s、%v、? 等），否则会报错。
+
         Args:
             table_name:   系统表全名，如 'pg_class'、'information_schema.columns'
-            where_clause: WHERE 条件（不含 WHERE 关键字），如 "nspname = 'ods'"
+            where_clause: WHERE 条件（不含 WHERE 关键字），值直接写入，如 "nspname = 'ods'"
             columns:      SELECT 的列名，默认 '*'
             limit:        最大返回行数，上限 100
         """
@@ -614,6 +619,13 @@ def create_db_tools(dsn: str) -> list[BaseTool]:
             f"SELECT {columns} FROM {table_name} "  # noqa: S608
             f"WHERE {where_clause} LIMIT {safe_limit}"
         )
+
+        # 占位符检测：where_clause 必须是静态值，不允许 %x 格式
+        if re.search(r"%[^%]", where_clause):
+            return (
+                "[BLOCKED] where_clause 包含占位符（如 %s、%v），"
+                "请直接把值写入字符串，例如 \"nspname = 'ods'\"，不要使用参数占位符。"
+            )
 
         # 再过一遍写操作检查
         reason = _validate_catalog_query(sql)

@@ -51,3 +51,14 @@ class SyntaxAnalysisSummary(BaseModel):
     recommendations: list[str] = Field(
         default_factory=list, description="针对本次发版的改进建议"
     )
+
+
+class SyntaxFileAnalysis(BaseModel):
+    """单文件语法分析结果（LLM 输出，例行并发）。"""
+
+    top_issues: list[str] = Field(
+        default_factory=list, description="最重要的 3−5 条问题摘要，每条 ≤ 50 字"
+    )
+    recommendations: list[str] = Field(
+        default_factory=list, description="针对此文件的2−3 条改进建议，每条 ≤ 80 字"
+    )

@@ -54,3 +54,21 @@ SYNTAX_REPORT_PROMPT = """\
 - 高危问题用 🔴 标注，中等用 🟡，低级用 🔵
 - 输出纯 Markdown 文本，不要额外解释
 """
+
+
+SYNTAX_FILE_ANALYSIS_PROMPT = """\
+你是 SQL 代码审查专家。请分析以下单个 SQL 文件的语法问题，针对此文件精简输出提炼和建议。
+
+文件名：{filename}
+语句数量：{statement_count}
+
+静态分析工具已发现的问题（JSON）：
+{issues_json}
+
+主要语句摘要：
+{statements_summary}
+
+请输出：
+- top_issues：最重要的 3～5 条问题摘要，每条 ≤ 50 字
+- recommendations：针对此文件的2～3 条改进建议，每条 ≤ 80 字
+"""

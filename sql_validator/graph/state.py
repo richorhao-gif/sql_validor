@@ -27,6 +27,9 @@ class SQLValidationState(TypedDict):
     sql_files: list[dict]          # list[SQLFile.model_dump()]
     change_description: str
 
+    # ── input_processor 提取的对象名（供 db_context_agent set diff 校验）────
+    object_names: list[str]
+
     # ── DB 上下文（db_context_agent 产出）────────────────────────────────────
     db_snapshot: Optional[dict]    # DBSnapshot.model_dump() | None
 
@@ -34,17 +37,19 @@ class SQLValidationState(TypedDict):
     parsed_scripts: Annotated[list[dict], operator.add]      # list[ParsedScript.model_dump()]
     raw_syntax_issues: Annotated[list[dict], operator.add]   # list[SyntaxIssue.model_dump()]
 
+    # ── 语法 Worker 聚合（input_processor 后立即并发）────────────────────────
+    syntax_file_results: Annotated[list[dict], operator.add]  # per-file 语法分析结果
+
     # ── 顺序分析阶段 ──────────────────────────────────────────────────────────
     dependency_graph: Optional[dict]   # DependencyGraph.model_dump() | None
     db_impact: Optional[dict]          # DBImpactAnalysis.model_dump() | None
 
-    # ── 双轨并行分析（change_verifier + syntax_summarizer）────────────────────
+    # ── 变更校验（change_verifier 产出）──────────────────────────────────────
     change_verification: Optional[dict]  # ChangeVerificationResult.model_dump() | None
-    syntax_summary: Optional[dict]       # SyntaxAnalysisSummary.model_dump() | None
 
     # ── 最终产出 ──────────────────────────────────────────────────────────────
-    change_report_md: str
-    syntax_report_md: str
+    change_report_path: str
+    syntax_report_path: str
 
     # ── 控制字段 ──────────────────────────────────────────────────────────────
     errors: Annotated[list[str], operator.add]
@@ -52,13 +57,15 @@ class SQLValidationState(TypedDict):
 
 
 class FileAnalyzerInput(TypedDict):
-    """
-    通过 Send API 分发给并行 file_analyzer Worker 的载荷。
-    作为 add_node(..., input_schema=FileAnalyzerInput) 的输入 Schema。
-    """
+    """通过 Send API 分发给并行 file_analyzer Worker 的载荷。"""
+    file: dict
+    db_snapshot: Optional[dict]
+    change_description: str
 
-    file: dict           # SQLFile.model_dump()
-    db_snapshot: Optional[dict]  # DBSnapshot.model_dump() | None
+
+class SyntaxFileWorkerInput(TypedDict):
+    """通过 Send API 分发给并行 syntax_file_worker Worker 的载荷。不依赖 DB 快照。"""
+    file: dict
     change_description: str
 
 
@@ -67,15 +74,16 @@ def make_initial_state(sql_files: list[dict], change_description: str) -> SQLVal
     return SQLValidationState(
         sql_files=sql_files,
         change_description=change_description,
+        object_names=[],
         db_snapshot=None,
         parsed_scripts=[],
         raw_syntax_issues=[],
+        syntax_file_results=[],
         dependency_graph=None,
         db_impact=None,
         change_verification=None,
-        syntax_summary=None,
-        change_report_md="",
-        syntax_report_md="",
+        change_report_path="",
+        syntax_report_path="",
         errors=[],
         messages=[],
     )

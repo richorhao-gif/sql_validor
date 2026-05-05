@@ -6,13 +6,16 @@ LangGraph 主图组装。
 节点路由示意：
   START
     → input_processor
-    → db_context_agent
-    → [file_analyzer × N]  (Send API 扇出 + Fan-in)
-    → dependency_analyzer
-    → db_impact_analyzer
-    → [change_verifier, syntax_summarizer]  (并行 Fork)
-    → report_generator       (Fan-in 屏障：等两条分支都完成)
-    → END
+         ↓                              ↘
+    db_context_agent            [syntax_file_worker × N]   (Send API 扇出)
+         ↓                              ↓ (Fan-in)
+    [file_analyzer × N]         syntax_summarizer → 写语法报告 → END
+         ↓ (Fan-in)
+    dependency_analyzer
+         ↓
+    db_impact_analyzer
+         ↓
+    change_verifier → 写变更报告 → END
 """
 from __future__ import annotations
 
@@ -28,14 +31,34 @@ from sql_validator.graph.nodes.db_impact_analyzer import make_db_impact_analyzer
 from sql_validator.graph.nodes.dependency_analyzer import make_dependency_analyzer_node
 from sql_validator.graph.nodes.file_analyzer import make_file_analyzer_node
 from sql_validator.graph.nodes.input_processor import input_processor
-from sql_validator.graph.nodes.report_generator import make_report_generator_node
+from sql_validator.graph.nodes.syntax_file_worker import make_syntax_file_worker_node
 from sql_validator.graph.nodes.syntax_summarizer import make_syntax_summarizer_node
-from sql_validator.graph.state import FileAnalyzerInput, SQLValidationState
+from sql_validator.graph.state import FileAnalyzerInput, SQLValidationState, SyntaxFileWorkerInput
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 路由函数
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _route_after_input_processor(state: SQLValidationState) -> list:
+    """
+    input_processor 完成后同时触发两条链路：
+    1. db_context_agent（主分析链）
+    2. syntax_file_worker × N（每文件语法分析，Send API 扇出）
+    """
+    sends: list = ["db_context_agent"]
+    sends += [
+        Send(
+            "syntax_file_worker",
+            SyntaxFileWorkerInput(
+                file=f,
+                change_description=state["change_description"],
+            ),
+        )
+        for f in state["sql_files"]
+    ]
+    return sends
+
 
 def _route_to_file_analyzers(state: SQLValidationState) -> list[Send]:
     """
@@ -53,14 +76,6 @@ def _route_to_file_analyzers(state: SQLValidationState) -> list[Send]:
         )
         for f in state["sql_files"]
     ]
-
-
-def _route_to_final_analysis(state: SQLValidationState) -> list[str]:
-    """
-    db_impact_analyzer 完成后，并行触发两条分支：
-    change_verifier 和 syntax_summarizer。
-    """
-    return ["change_verifier", "syntax_summarizer"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,22 +128,25 @@ def build_graph(
 
     builder.add_node(
         "change_verifier",
-        make_change_verifier_node(llm),
+        make_change_verifier_node(llm, output_dir=output_dir),
+    )
+
+    builder.add_node(
+        "syntax_file_worker",
+        make_syntax_file_worker_node(llm),
+        input_schema=SyntaxFileWorkerInput,
     )
 
     builder.add_node(
         "syntax_summarizer",
-        make_syntax_summarizer_node(llm),
-    )
-
-    builder.add_node(
-        "report_generator",
-        make_report_generator_node(llm, output_dir=output_dir),
+        make_syntax_summarizer_node(output_dir=output_dir),
     )
 
     # ── 串行边 ────────────────────────────────────────────────────────────────
     builder.add_edge(START, "input_processor")
-    builder.add_edge("input_processor", "db_context_agent")
+
+    # input_processor → db_context_agent（主链）+ syntax_file_worker × N（语法链）
+    builder.add_conditional_edges("input_processor", _route_after_input_processor)
 
     # db_context_agent → Send 扇出到 N 个 file_analyzer
     builder.add_conditional_edges(
@@ -136,18 +154,14 @@ def build_graph(
         _route_to_file_analyzers,
     )
 
-    # 所有 file_analyzer 完成后 → dependency_analyzer（Fan-in 由 LangGraph 自动处理）
+    # 所有 file_analyzer 完成后 → dependency_analyzer（Fan-in）
     builder.add_edge("file_analyzer", "dependency_analyzer")
     builder.add_edge("dependency_analyzer", "db_impact_analyzer")
+    builder.add_edge("db_impact_analyzer", "change_verifier")
+    builder.add_edge("change_verifier", END)
 
-    # db_impact_analyzer → 并行 Fork 到两条分支
-    builder.add_conditional_edges(
-        "db_impact_analyzer",
-        _route_to_final_analysis,
-    )
-
-    # 两条分支都完成 → report_generator（Fan-in 屏障）
-    builder.add_edge(["change_verifier", "syntax_summarizer"], "report_generator")
-    builder.add_edge("report_generator", END)
+    # 所有 syntax_file_worker 完成后 → syntax_summarizer（Fan-in）→ END
+    builder.add_edge("syntax_file_worker", "syntax_summarizer")
+    builder.add_edge("syntax_summarizer", END)
 
     return builder.compile(checkpointer=checkpointer)

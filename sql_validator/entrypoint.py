@@ -91,27 +91,13 @@ def run_validation(request: ValidationRequest) -> ValidationResult:
     verdict = verification.get("verdict", "FAIL")
     risk_level = verification.get("risk_level", "HIGH")
 
-    syntax_summary = final_state.get("syntax_summary") or {}
-    quality_score = syntax_summary.get("quality_score", 0)
-
     summary = (
         f"变更校验：{verdict}（风险：{risk_level}），"
-        f"代码质量：{quality_score}/100 分，"
         f"共 {len(request.sql_files)} 个文件"
     )
 
-    # 从 report_generator 写入的 MD 文件路径中推断文件名
-    # （report_generator 使用时间戳命名，此处从 state 中获取相对路径）
-    from pathlib import Path
-    from datetime import datetime
-
-    # 找最新的报告文件
-    out_dir = Path(settings.output_dir)
-    change_reports = sorted(out_dir.glob("change_report_*.md"), reverse=True)
-    syntax_reports = sorted(out_dir.glob("syntax_report_*.md"), reverse=True)
-
-    change_path = str(change_reports[0]) if change_reports else f"{settings.output_dir}/change_report.md"
-    syntax_path = str(syntax_reports[0]) if syntax_reports else f"{settings.output_dir}/syntax_report.md"
+    change_path = final_state.get("change_report_path") or f"{settings.output_dir}/change_report.md"
+    syntax_path = final_state.get("syntax_report_path") or f"{settings.output_dir}/syntax_report.md"
 
     return ValidationResult(
         change_report_path=change_path,
