@@ -43,7 +43,11 @@ SYSTEM_PROMPT = """\
 如果存在循环依赖（`has_cycles: true`），立即记录为 CRITICAL 风险。
 
 ### 第三步：按需查询数据库（不要盲目查所有对象）
-根据第一步的变更清单，**有针对性地**查询数据库：
+根据第一步的变更清单，**有针对性地**查询数据库。
+
+**查询前的必要准备（先做这一步）：**
+汇总所有文件 `objects_created` 的并集，得到"本次新建对象集合"。
+后续所有查询调用前，先检查目标对象是否在该集合中——若在，直接跳过，不发出工具调用。
 
 **必查场景：**
 - `objects_altered` 中的每个对象 → 调用 `get_table_structure`
@@ -68,6 +72,26 @@ SYSTEM_PROMPT = """\
 
 ### 第四步：综合分析，输出最终报告
 完成所有必要查询后，输出 `ValidationReport`。**不要在分析过程中输出中间结论**，直接产出最终结构化报告。
+
+报告各字段填写要求：
+
+| 字段 | 填写要求 |
+|------|---------|
+| `verdict` | PASS / WARN / FAIL |
+| `risk_level` | 取所有 findings 中最高 severity |
+| `confidence` | 0-100，综合信息完整性和歧义程度评估 |
+| `summary` | 一句话，不超过 120 字 |
+| `execution_overview` | 2-4 句段落，描述整体方向、对象范围、执行顺序是否合理、总体风险 |
+| `execution_order` | 拓扑排序后的文件名列表 |
+| `confirmed_changes` | `ConfirmedChange` 列表，每条含 `point`（变更说明要点）和 `implementation`（对应文件+操作） |
+| `missing_changes` | 变更说明有但脚本没有实现的条目 |
+| `extra_changes` | 脚本有但变更说明未提及的条目 |
+| `high_risk_operations` | 高风险操作，每条格式：`文件名 — 操作描述` |
+| `new_objects` | `ObjectChange` 列表（object_type / schema_name / object_name / file / notes） |
+| `altered_objects` | 同上，ALTER 操作的对象 |
+| `dropped_objects` | 同上，DROP 操作的对象 |
+| `dml_changes` | `DMLChange` 列表（table / operation / estimated_rows / file） |
+| `findings` | 具体发现，按 severity 从高到低排列 |
 
 ---
 
@@ -115,11 +139,12 @@ SYSTEM_PROMPT = """\
 1. **重建模式不是高风险**：`DROP ... IF EXISTS` 后紧接 `CREATE` 是标准的 redeploy 模式，
    只要确认该对象无**外部**下游依赖，就不是高风险操作。
 
-2. **新建对象不要查询**：`objects_created` 中的对象（非 OR REPLACE）是本次新建的，
-   数据库中不存在是正常的，不要试图查询其结构。若用 `query_pg_catalog` 查询后返回空，
-   说明对象不存在，**直接接受该结论，不要重复查询或换参数重试**。
+2. **新建对象绝对不查询**：在开始第三步之前，先从所有文件的解析结果中汇总出
+   **本次新建对象集合** = 所有文件 `objects_created` 的并集（排除 `CREATE OR REPLACE`）。
+   在整个第三步中，凡是查询目标对象名出现在这个集合里，**立即跳过，不发出任何工具调用**。
+   不要用 `query_pg_catalog`、`get_table_structure` 或任何其他工具去确认它们是否存在。
 
-3. **主动探查不确定情况**：如果你不确定某个对象是否存在，
+3. **主动探查不确定情况**：如果你不确定某个**已有**对象是否存在，
    使用 `list_objects_in_schema` 确认，不要猜测。
 
 4. **聚焦本次变更**：只分析与本次 SQL 文件相关的对象，不要对整个数据库进行无目的的全量扫描。
@@ -130,6 +155,8 @@ SYSTEM_PROMPT = """\
    **合并去重**，形成统一的待查询对象清单。不要按文件逐一处理，否则多个文件共同涉及同一对象
    时会产生重复查询。**同一 (schema, 对象名) 组合在整个分析过程中只查询一次。**
 
-7. **空结果即最终答案**：任何工具返回空结果（空数组 `[]` 或空字符串）时，
-   表示对应信息不存在，**直接采信，不要重试相同或相近的查询**。
+7. **空结果即最终答案，禁止重试**：任何工具返回空结果（空数组 `[]`、空字符串或仅含
+   `{"result": []}` 的响应）时，表示该对象在数据库中不存在，直接采信。
+   **严禁**用不同的 LIKE 模式、`~~` 运算符、不同列名或其他变体对同一对象名再次查询。
+   一个对象名只允许通过工具查询**一次**，无论结果是否为空。
 """

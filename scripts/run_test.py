@@ -148,7 +148,11 @@ def print_result(result, elapsed: float, verbose: bool) -> None:
             _info(line)
 
     _section("输出报告路径")
-    _ok(f"报告文件 : {result.report_path}")
+    _ok(f"变更校验报告 : {result.report_path}")
+    if getattr(result, "syntax_report_path", None):
+        _ok(f"语法质量报告 : {result.syntax_report_path}")
+    else:
+        _warn("语法质量报告未生成（分析失败或未启用）")
 
     if verbose:
         _section("详细报告内容（--verbose，前 60 行）")
