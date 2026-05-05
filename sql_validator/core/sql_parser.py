@@ -162,6 +162,10 @@ def _extract_statement_info(
         this = stmt.args.get("this")
         if isinstance(this, exp.Table):
             schema, name = _extract_table_name(this)
+        elif isinstance(this, exp.Schema):
+            # CREATE TABLE foo (...) — this 是 exp.Schema，内部 this 才是 exp.Table
+            inner = this.args.get("this")
+            schema, name = _extract_table_name(inner if isinstance(inner, exp.Table) else None)
         elif hasattr(this, "name"):
             schema, name = "public", this.name  # type: ignore[attr-defined]
         else:
@@ -368,28 +372,3 @@ def _unique(items: list[str]) -> list[str]:
             result.append(item)
     return result
 
-
-def extract_all_object_names(files: list[dict[str, Any]]) -> list[str]:
-    """
-    轻量预扫描：提取所有文件中出现的对象名（供 db_context_agent 参考）。
-    不做深度分析，仅收集对象名集合。
-    """
-    names: set[str] = set()
-    for file in files:
-        try:
-            _sqlglot_logger.setLevel(logging.ERROR)
-            stmts = sqlglot.parse(
-                file.get("content", ""),
-                dialect="postgres",
-                error_level=sqlglot.ErrorLevel.IGNORE,
-            )
-        except Exception:  # noqa: BLE001
-            continue
-        for stmt in stmts:
-            if stmt is None:
-                continue
-            for table in stmt.find_all(exp.Table):
-                schema, name = _extract_table_name(table)
-                if name:
-                    names.add(f"{schema}.{name}")
-    return sorted(names)

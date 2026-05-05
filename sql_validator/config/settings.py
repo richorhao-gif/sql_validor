@@ -37,6 +37,12 @@ class Settings(BaseSettings):
         le=10,
         description="LLM 调用最大重试次数",
     )
+    llm_timeout: int = Field(
+        default=120,
+        ge=10,
+        le=600,
+        description="单次 LLM 请求超时秒数，防止 API 无响应时进程挂死",
+    )
 
     # ── Database ───────────────────────────────────────────────────────────
     postgres_dsn: str = Field(
@@ -89,6 +95,7 @@ class Settings(BaseSettings):
                 api_key=self.llm_api_key,  # type: ignore[arg-type]
                 temperature=self.llm_temperature,
                 max_retries=self.llm_max_retries,
+                timeout=self.llm_timeout,
             )
 
         # 默认：OpenAI / 任何 OpenAI 兼容接口
@@ -100,6 +107,7 @@ class Settings(BaseSettings):
             base_url=self.llm_base_url,
             temperature=self.llm_temperature,
             max_retries=self.llm_max_retries,
+            timeout=self.llm_timeout,
         )
 
 

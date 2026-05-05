@@ -60,8 +60,7 @@ class ValidationRequest(BaseModel):
 class ValidationResult(BaseModel):
     """智能体最终输出结果。"""
 
-    change_report_path: str = Field(description="变更对比报告 MD 文件路径")
-    syntax_report_path: str = Field(description="语法质量报告 MD 文件路径")
+    report_path: str = Field(description="校验报告 MD 文件路径")
     verdict: str = Field(description="总体判定: PASS | WARN | FAIL")
     risk_level: str = Field(description="风险等级: LOW | MEDIUM | HIGH | CRITICAL")
     summary: str = Field(description="一句话摘要")
