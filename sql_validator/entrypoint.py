@@ -83,141 +83,178 @@ def _write_report(report: ValidationReport, sql_file_count: int, output_dir: str
     sev_icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🔵", "INFO": "⚪"}
     confidence_str = f"{report.confidence}%" if report.confidence else "—"
 
+    conclusion_label = {
+        "PASS": "✅ 审核结论：建议正常发版",
+        "WARN": "⚠️ 审核结论：建议审查高风险项后再发版",
+        "FAIL": "❌ 审核结论：存在阻断性风险，暂不建议发版",
+    }.get(report.verdict, report.verdict)
+
+    callout_type = {"PASS": "TIP", "WARN": "WARNING", "FAIL": "CAUTION"}.get(report.verdict, "NOTE")
+
     lines: list[str] = [
         "# SQL 脚本变更说明对比报告",
         "",
         "| 字段 | 值 |",
-        "|---|---|",
-        f"| 生成时间 | {ts_display} |",
-        f"| SQL 文件数 | {sql_file_count} |",
-        f"| 总体判定 | {verdict_icon} **{report.verdict}** |",
-        f"| 风险等级 | {risk_icon} {report.risk_level} |",
-        f"| LLM 置信度 | {confidence_str} |",
+        "|:---|:---|",
+        f"| 📅 生成时间 | {ts_display} |",
+        f"| 📁 SQL 文件数 | {sql_file_count} |",
+        f"| 🏁 总体判定 | {verdict_icon} **{report.verdict}** |",
+        f"| {risk_icon} 风险等级 | **{report.risk_level}** |",
+        f"| 🤖 LLM 置信度 | {confidence_str} |",
         "",
         "---",
         "",
+        "## 审核结论",
+        "",
+        f"> [!{callout_type}]",
+        f"> **{conclusion_label}**",
+        ">",
+        f"> {report.summary}",
+        "",
     ]
 
-    # 执行概要
-    lines += ["## 执行概要", ""]
-    if report.execution_overview:
-        lines += [report.execution_overview, ""]
-    elif report.summary:
-        lines += [report.summary, ""]
-
     if report.execution_order:
-        lines += ["> **推荐执行顺序：** " + " → ".join(f"`{f}`" for f in report.execution_order), ""]
+        lines += [
+            "> **推荐执行顺序：** " + " → ".join(f"`{f}`" for f in report.execution_order),
+            "",
+        ]
 
     lines += ["---", ""]
 
-    # 变更覆盖情况
-    lines += ["## 变更覆盖情况", ""]
+    # 执行概要
+    if report.execution_overview or report.summary:
+        lines += ["## 执行概要", ""]
+        if report.execution_overview:
+            lines += [report.execution_overview, ""]
+        else:
+            lines += [report.summary, ""]
+        lines += ["---", ""]
 
-    lines += [f"### ✅ 已确认（{len(report.confirmed_changes)} 项）", ""]
+    # 变更覆盖情况
+    confirmed_n = len(report.confirmed_changes)
+    missing_n   = len(report.missing_changes)
+    extra_n     = len(report.extra_changes)
+
+    lines += [
+        "## 变更覆盖情况",
+        "",
+        f"| 类别 | 数量 |",
+        "|:---|:---:|",
+        f"| ✅ 已确认 | {confirmed_n} |",
+        f"| ❌ 遗漏 | {missing_n} |",
+        f"| ⚠️ 额外变更 | {extra_n} |",
+        "",
+    ]
+
+    lines += [f"### ✅ 已确认（{confirmed_n} 项）", ""]
     if report.confirmed_changes:
-        lines += ["| 变更说明要点 | 对应实现 |", "|---|---|"]
-        for c in report.confirmed_changes:
-            lines.append(f"| {c.point} | {c.implementation} |")
+        lines += ["| # | 变更说明要点 | 对应实现 |", "|:---:|:---|:---|"]
+        for i, c in enumerate(report.confirmed_changes, 1):
+            lines.append(f"| {i} | {c.point} | {c.implementation} |")
     else:
-        lines.append("无已确认变更。")
+        lines.append("_无已确认变更。_")
     lines.append("")
 
-    lines += [f"### ❌ 遗漏（{len(report.missing_changes)} 项）", ""]
+    lines += [f"### ❌ 遗漏（{missing_n} 项）", ""]
     if report.missing_changes:
         for c in report.missing_changes:
-            lines.append(f"- {c}")
+            lines.append(f"- ❌ {c}")
     else:
-        lines.append("无遗漏项。")
+        lines.append("_无遗漏项。_")
     lines.append("")
 
-    lines += [f"### ⚠️ 额外变更（{len(report.extra_changes)} 项）", ""]
+    lines += [f"### ⚠️ 额外变更（{extra_n} 项）", ""]
     if report.extra_changes:
         for c in report.extra_changes:
-            lines.append(f"- {c}")
+            lines.append(f"- ⚠️ {c}")
     else:
-        lines.append("无额外变更。")
+        lines.append("_无额外变更。_")
     lines += ["", "---", ""]
 
     # 高风险操作
     lines += ["## 🔴 高风险操作清单", ""]
     if report.high_risk_operations:
-        lines += ["| # | 操作描述 |", "|---|---|"]
+        lines += ["| # | 操作描述 |", "|:---:|:---|"]
         for i, op in enumerate(report.high_risk_operations, 1):
             lines.append(f"| {i} | {op} |")
     else:
-        lines.append("无高风险操作。")
+        lines += ["> [!TIP]", "> 无高风险操作，本次变更较为安全。"]
     lines += ["", "---", ""]
 
     # 数据库变更影响详情
-    lines += ["## 数据库变更影响详情", ""]
+    new_n     = len(report.new_objects)
+    altered_n = len(report.altered_objects)
+    dropped_n = len(report.dropped_objects)
+    dml_n     = len(report.dml_changes)
 
-    lines += [f"### 新增对象（{len(report.new_objects)} 个）", ""]
+    lines += [
+        "## 数据库变更影响详情",
+        "",
+        f"| 类别 | 数量 |",
+        "|:---|:---:|",
+        f"| 🆕 新增对象 | {new_n} |",
+        f"| ✏️ 修改对象 | {altered_n} |",
+        f"| 🗑️ 删除对象 | {dropped_n} |",
+        f"| 📝 DML 操作 | {dml_n} |",
+        "",
+    ]
+
+    lines += [f"### 🆕 新增对象（{new_n} 个）", ""]
     if report.new_objects:
-        lines += ["| 对象类型 | Schema | 对象名 | 所在文件 | 备注 |", "|---|---|---|---|---|"]
+        lines += ["| 对象类型 | Schema | 对象名 | 所在文件 | 备注 |", "|:---|:---|:---|:---|:---|"]
         for o in report.new_objects:
-            lines.append(f"| {o.object_type} | `{o.schema_name}` | `{o.object_name}` | `{o.file}` | {o.notes} |")
+            lines.append(f"| `{o.object_type}` | `{o.schema_name}` | `{o.object_name}` | `{o.file}` | {o.notes} |")
     else:
-        lines.append("无。")
+        lines.append("_无。_")
     lines.append("")
 
-    lines += [f"### 修改对象（{len(report.altered_objects)} 个）", ""]
+    lines += [f"### ✏️ 修改对象（{altered_n} 个）", ""]
     if report.altered_objects:
-        lines += ["| 对象类型 | Schema | 对象名 | 所在文件 | 备注 |", "|---|---|---|---|---|"]
+        lines += ["| 对象类型 | Schema | 对象名 | 所在文件 | 备注 |", "|:---|:---|:---|:---|:---|"]
         for o in report.altered_objects:
-            lines.append(f"| {o.object_type} | `{o.schema_name}` | `{o.object_name}` | `{o.file}` | {o.notes} |")
+            lines.append(f"| `{o.object_type}` | `{o.schema_name}` | `{o.object_name}` | `{o.file}` | {o.notes} |")
     else:
-        lines.append("无。")
+        lines.append("_无。_")
     lines.append("")
 
-    lines += [f"### 删除对象（{len(report.dropped_objects)} 个）", ""]
+    lines += [f"### 🗑️ 删除对象（{dropped_n} 个）", ""]
     if report.dropped_objects:
-        lines += ["| 对象类型 | Schema | 对象名 | 所在文件 | 备注 |", "|---|---|---|---|---|"]
+        lines += ["| 对象类型 | Schema | 对象名 | 所在文件 | 备注 |", "|:---|:---|:---|:---|:---|"]
         for o in report.dropped_objects:
-            lines.append(f"| {o.object_type} | `{o.schema_name}` | `{o.object_name}` | `{o.file}` | {o.notes} |")
+            lines.append(f"| `{o.object_type}` | `{o.schema_name}` | `{o.object_name}` | `{o.file}` | {o.notes} |")
     else:
-        lines.append("无。")
+        lines.append("_无。_")
     lines.append("")
 
-    lines += ["### DML 数据影响", ""]
+    lines += ["### 📝 DML 数据影响", ""]
     if report.dml_changes:
-        lines += ["| 表名 | 操作 | 影响行数估算 | 所在文件 |", "|---|---|---|---|"]
+        lines += ["| 表名 | 操作 | 影响行数估算 | 所在文件 |", "|:---|:---:|:---|:---|"]
         for d in report.dml_changes:
-            lines.append(f"| `{d.table}` | {d.operation} | {d.estimated_rows} | `{d.file}` |")
+            lines.append(f"| `{d.table}` | `{d.operation}` | {d.estimated_rows} | `{d.file}` |")
     else:
-        lines.append("无 DML 操作。")
+        lines.append("_无 DML 操作。_")
     lines += ["", "---", ""]
 
     # 详细 findings
     if report.findings:
         lines += ["## 详细发现", ""]
-        for finding in report.findings:
+        for idx, finding in enumerate(report.findings, 1):
             icon = sev_icon.get(finding.severity, "")
             lines += [
-                f"### {icon} [{finding.severity}] {finding.category} — `{finding.file}`",
+                f"### {icon} F{idx} · [{finding.severity}] {finding.category} — `{finding.file}`",
                 "",
                 finding.description,
             ]
             if finding.suggestion:
-                lines += ["", f"**建议：** {finding.suggestion}"]
+                lines += ["", f"> [!TIP]", f"> **建议：** {finding.suggestion}"]
             lines.append("")
         lines += ["---", ""]
 
-    # 审核结论
-    conclusion_map = {
-        "PASS": "✅ 审核结论：建议正常发版",
-        "WARN": "⚠️ 审核结论：建议审查高风险项后再发版",
-        "FAIL": "❌ 审核结论：存在阻断性风险，暂不建议发版",
-    }
     lines += [
-        "## 审核结论",
-        "",
-        f"> **{conclusion_map.get(report.verdict, report.verdict)}**",
-        ">",
-        f"> {report.summary}",
         "",
         "---",
         "",
-        "*本报告由 SQL 变更校验智能体自动生成*",
+        "<sub>🤖 本报告由 SQL 变更校验智能体自动生成</sub>",
     ]
 
     with open(path, "w", encoding="utf-8") as fh:
@@ -243,30 +280,50 @@ def _write_syntax_report(report: SyntaxReport, output_dir: str) -> str:
 
     score = report.quality_score
     score_icon = "🟢" if score >= 85 else ("🟡" if score >= 60 else "🔴")
+    score_callout = "TIP" if score >= 85 else ("WARNING" if score >= 60 else "CAUTION")
 
     lines: list[str] = [
         "# SQL 脚本语法与质量分析报告",
         "",
         "| 字段 | 值 |",
-        "|---|---|",
-        f"| 生成时间 | {ts_display} |",
-        f"| 分析文件数 | {len(report.file_results)} |",
-        f"| 综合质量评分 | {score_icon} **{score} / 100** |",
-        f"| ERROR 数 | {len(errors)} |",
-        f"| WARNING 数 | {len(warnings)} |",
-        f"| INFO 数 | {len(infos)} |",
+        "|:---|:---|",
+        f"| 📅 生成时间 | {ts_display} |",
+        f"| 📁 分析文件数 | {len(report.file_results)} |",
+        f"| {score_icon} 综合质量评分 | **{score} / 100** |",
+        f"| 🔴 ERROR 数 | **{len(errors)}** |",
+        f"| 🟡 WARNING 数 | **{len(warnings)}** |",
+        f"| 🔵 INFO 数 | {len(infos)} |",
         "",
         "---",
         "",
+        "## 质量结论",
+        "",
+        f"> [!{score_callout}]",
+        f"> **综合质量评分：{score_icon} {score} / 100**",
+        ">",
     ]
+
+    if report.improvement_suggestions:
+        lines += ["> **最优先改进项：**", ">"]
+        for s in report.improvement_suggestions[:3]:
+            lines.append(f"> - {s}")
+    else:
+        lines.append("> 本次脚本质量良好，无重大改进建议。")
+
+    lines += ["", "---", ""]
 
     # 各文件概览表
     lines += ["## 各文件质量概览", ""]
-    lines += ["| 文件名 | ERROR | WARNING | INFO | 主要问题摘要 |", "|---|---|---|---|---|"]
+    lines += [
+        "| 文件名 | 🔴 ERROR | 🟡 WARNING | 🔵 INFO | 主要问题摘要 |",
+        "|:---|:---:|:---:|:---:|:---|",
+    ]
     for fr in report.file_results:
+        e_cell = f"**{fr.error_count}**" if fr.error_count else "—"
+        w_cell = f"**{fr.warning_count}**" if fr.warning_count else "—"
+        i_cell = str(fr.info_count) if fr.info_count else "—"
         lines.append(
-            f"| `{fr.filename}` | {fr.error_count} | {fr.warning_count} "
-            f"| {fr.info_count} | {fr.main_issues} |"
+            f"| `{fr.filename}` | {e_cell} | {w_cell} | {i_cell} | {fr.main_issues} |"
         )
     lines += ["", "---", ""]
 
@@ -275,19 +332,17 @@ def _write_syntax_report(report: SyntaxReport, output_dir: str) -> str:
     if errors:
         for i, f in enumerate(errors, 1):
             lines += [
-                f"### E{i} · `{f.filename}` — {f.rule}",
+                f"### E{i} · `{f.filename}` — `{f.rule}`",
                 "",
-                f"**规则：** `{f.rule}`  ",
-                f"**严重度：** ERROR  ",
                 f"**描述：** {f.description}",
             ]
             if f.sql_snippet:
                 lines += ["", "**涉及片段：**", f"```sql\n{f.sql_snippet}\n```"]
             if f.suggestion:
-                lines += ["", f"**建议：** {f.suggestion}"]
+                lines += ["", "> [!TIP]", f"> **建议：** {f.suggestion}"]
             lines.append("")
     else:
-        lines.append("本次发版无 ERROR 级语法问题。")
+        lines += ["> [!TIP]", "> 本次发版无 ERROR 级语法问题。"]
     lines += ["", "---", ""]
 
     # WARNING
@@ -295,67 +350,69 @@ def _write_syntax_report(report: SyntaxReport, output_dir: str) -> str:
     if warnings:
         for i, f in enumerate(warnings, 1):
             lines += [
-                f"### W{i} · `{f.filename}` — {f.rule}",
+                f"### W{i} · `{f.filename}` — `{f.rule}`",
                 "",
-                f"**规则：** `{f.rule}`  ",
-                f"**严重度：** WARNING  ",
                 f"**描述：** {f.description}",
             ]
             if f.sql_snippet:
                 lines += ["", "**涉及片段：**", f"```sql\n{f.sql_snippet}\n```"]
             if f.suggestion:
-                lines += ["", f"**建议：** {f.suggestion}"]
+                lines += ["", "> [!TIP]", f"> **建议：** {f.suggestion}"]
             lines.append("")
     else:
-        lines.append("本次发版无 WARNING 级问题。")
+        lines += ["> [!TIP]", "> 本次发版无 WARNING 级问题。"]
     lines += ["", "---", ""]
 
     # INFO
     lines += [f"## 🔵 INFO 级问题（{len(infos)} 项）", ""]
     if infos:
-        lines += ["| # | 文件 | 规则 | 描述 |", "|---|---|---|---|"]
+        lines += ["| # | 文件 | 规则 | 描述 |", "|:---:|:---|:---|:---|"]
         for i, f in enumerate(infos, 1):
             desc_short = f.description[:80] + ("…" if len(f.description) > 80 else "")
             lines.append(f"| {i} | `{f.filename}` | `{f.rule}` | {desc_short} |")
     else:
-        lines.append("无 INFO 级问题。")
+        lines.append("_无 INFO 级问题。_")
     lines += ["", "---", ""]
 
-    # 专项分析
+    # 专项安全与性能分析
+    has_risks = any([
+        report.no_where_deletes, report.no_where_updates,
+        report.truncates, report.drops, report.select_stars,
+    ])
     lines += [
         "## 专项分析",
         "",
         "### 🛡️ 安全风险",
         "",
-        "| 风险类型 | 数量 | 详情 |",
-        "|---|---|---|",
-        f"| 无 WHERE 的 DELETE | {report.no_where_deletes} | {'见上方 WARNING' if report.no_where_deletes else '—'} |",
-        f"| 无 WHERE 的 UPDATE | {report.no_where_updates} | {'见上方 WARNING' if report.no_where_updates else '—'} |",
-        f"| TRUNCATE 操作 | {report.truncates} | {'见上方 WARNING' if report.truncates else '—'} |",
-        f"| DROP 操作 | {report.drops} | {'见上方 WARNING' if report.drops else '—'} |",
+        "| 风险类型 | 数量 | 状态 |",
+        "|:---|:---:|:---|",
+        f"| 无 WHERE 的 DELETE | {report.no_where_deletes} | {'🔴 需关注' if report.no_where_deletes else '✅ 无'} |",
+        f"| 无 WHERE 的 UPDATE | {report.no_where_updates} | {'🔴 需关注' if report.no_where_updates else '✅ 无'} |",
+        f"| TRUNCATE 操作 | {report.truncates} | {'🟡 需确认' if report.truncates else '✅ 无'} |",
+        f"| DROP 操作 | {report.drops} | {'🟡 需确认' if report.drops else '✅ 无'} |",
         "",
         "### ⚡ 性能规范",
         "",
-        "| 问题类型 | 数量 | 详情 |",
-        "|---|---|---|",
-        f"| SELECT * | {report.select_stars} | {'见上方 WARNING' if report.select_stars else '—'} |",
+        "| 问题类型 | 数量 | 状态 |",
+        "|:---|:---:|:---|",
+        f"| SELECT * 用法 | {report.select_stars} | {'🟡 建议明确列名' if report.select_stars else '✅ 无'} |",
         "",
         "---",
         "",
     ]
 
-    # 改进建议
+    # 完整改进建议
     lines += ["## 改进建议", ""]
     if report.improvement_suggestions:
         for i, s in enumerate(report.improvement_suggestions, 1):
             lines.append(f"{i}. {s}")
     else:
-        lines.append("暂无改进建议。")
+        lines.append("_暂无改进建议。_")
     lines += [
         "",
         "---",
         "",
-        "*本报告由 SQL 变更校验智能体自动生成*",
+        "<sub>🤖 本报告由 SQL 变更校验智能体自动生成</sub>",
     ]
 
     with open(path, "w", encoding="utf-8") as fh:
