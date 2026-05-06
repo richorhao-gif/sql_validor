@@ -42,8 +42,65 @@ SYSTEM_PROMPT = """\
 调用 `get_execution_order()`，确定文件执行顺序。
 如果存在循环依赖（`has_cycles: true`），立即记录为 CRITICAL 风险。
 
-### 第三步：按需查询数据库（不要盲目查所有对象）
-根据第一步的变更清单，**有针对性地**查询数据库。
+### 第三步：强制检查清单（数仓变更必查项）
+
+**这是数仓 SQL 变更审查的固定检查点，必须逐项执行，不可跳过：**
+
+#### 🔴 必查项 1：DROP TABLE 后的附属对象检查
+对 `objects_dropped` 中的每个**表**对象，**必须**依次调用以下工具：
+
+| 检查项 | 工具 | 风险等级 |
+|--------|------|----------|
+| 触发器 | `get_triggers(schema, table)` | MEDIUM |
+| RLS 策略 | `get_rls_policies(schema, table)` | MEDIUM |
+| 非主键索引 | `get_indexes(schema, table)` | MEDIUM |
+
+**判断规则：**
+- 若工具返回空 → 无此对象，跳过
+- 若工具返回非空 → 检查脚本中是否有重建语句
+  - 触发器：`CREATE TRIGGER` 或 `CREATE FUNCTION`
+  - RLS 策略：`ALTER TABLE ... ENABLE ROW LEVEL SECURITY` 或 `CREATE POLICY`
+  - 索引：`CREATE INDEX` 或 `CREATE UNIQUE INDEX`
+- **脚本中无重建语句 → 记录为 MEDIUM 风险**
+
+#### 🔴 必查项 2：DS 层外部表检查
+对变更说明中提到"DS 层重建"或"全链路重建"的资产，**必须**检查：
+
+| 检查项 | 方法 | 风险等级 |
+|--------|------|----------|
+| DS 层 FOREIGN TABLE 是否在脚本中重建 | 检查 `objects_created` 和 `objects_dropped` 中是否有 `ds_mannual.*` | HIGH |
+| 新增列是否在 DS 层外部表中存在 | 调用 `get_foreign_table_info` 确认列结构 | HIGH |
+
+**判断规则：**
+- 变更说明提到 DS 层操作但脚本中无对应语句 → **记录为 HIGH 风险**
+- DS 层外部表缺少新增列 → **记录为 HIGH 风险（数据链路断裂）**
+
+#### 🔴 必查项 3：COMMENT ON 语法检查
+**必须**检查每个 COMMENT ON 语句是否完整：
+
+| 检查项 | 正确格式 | 错误示例 |
+|--------|----------|----------|
+| COMMENT ON TABLE | `COMMENT ON TABLE schema.table IS '注释'` | `COMMENT ON TABLE schema IS '注释'` |
+| COMMENT ON VIEW | `COMMENT ON VIEW schema.view IS '注释'` | `COMMENT ON VIEW schema IS '注释'` |
+| COMMENT ON COLUMN | `COMMENT ON COLUMN schema.table.column IS '注释'` | `COMMENT ON COLUMN schema.table IS '注释'` |
+
+**判断规则：**
+- 缺少对象名（只有 schema 名）→ **记录为 CRITICAL 风险（语法错误）**
+- 缺少 IS 关键字或注释内容 → **记录为 CRITICAL 风险（语法错误）**
+
+#### 🔴 必查项 4：级联依赖检查
+对以下关键视图，**必须**调用 `get_upstream_dependencies` 检查依赖链：
+
+| 视图类型 | 检查重点 |
+|----------|----------|
+| 跨表宽视图（如 `v_da_sauce_material_full`） | 依赖的表被 DROP/ALTER 时，视图是否同步重建 |
+| security_invoker 视图 | 依赖的表/视图变更时，权限是否受影响 |
+| BI 自助层中文视图 | 依赖链是否完整 |
+
+---
+
+### 第四步：按需查询数据库（不要盲目查所有对象）
+根据第一步的变更清单和第三步的强制检查结果，**有针对性地**查询数据库。
 
 **查询前的必要准备（先做这一步）：**
 汇总所有文件 `objects_created` 的并集，得到"本次新建对象集合"。
@@ -119,6 +176,9 @@ SYSTEM_PROMPT = """\
 |------|------|
 | 变更说明中提到的内容在脚本中找不到对应实现 | 可能是遗漏了脚本 |
 | CREATE 缺少 IF NOT EXISTS | 重复执行会报错，降低幂等性 |
+| DROP TABLE 会删除触发器 | 触发器不会自动重建，可能导致审计/同步功能失效 |
+| DROP TABLE 会删除 RLS 策略 | 行级安全策略不会自动重建，可能导致数据泄露 |
+| DROP+CREATE 表后索引丢失 | 非主键索引不会自动重建，影响查询性能 |
 
 ### LOW
 | 场景 | 说明 |

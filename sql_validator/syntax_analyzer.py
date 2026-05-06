@@ -31,6 +31,7 @@ from sql_validator.schemas.syntax_report import SyntaxReport
 def run_syntax_analysis(
     sql_files: list[dict[str, Any]],
     llm: BaseChatModel,
+    callbacks: list | None = None,
 ) -> SyntaxReport:
     """
     对本次所有 SQL 文件执行语法与代码质量分析。
@@ -58,12 +59,17 @@ def run_syntax_analysis(
 
     user_msg = HumanMessage(
         content=(
-            f"## 本次发版 SQL 文件（共 {len(sql_files)} 个）\n\n"
+            f"## 【审查主体】本次发版 SQL 文件（共 {len(sql_files)} 个）\n\n"
+            f"请仔细阅读以下每个 SQL 文件，独立进行语法与质量审查。\n\n"
             f"{files_block}\n\n"
             f"---\n\n"
-            f"## 静态分析结果\n\n"
+            f"## 【辅助参考】静态分析工具的初步发现（共 {len(static_findings)} 条）\n\n"
+            f"> ⚠️ 以下结果仅为规则引擎的机械匹配，可能不完整、存在误报。\n"
+            f"> 请在完成独立审查之后，再对照此列表进行补充和修正。\n\n"
             f"```json\n{static_block}\n```\n\n"
-            f"请综合以上信息，产出完整的 SyntaxReport。"
+            f"---\n\n"
+            f"请综合你的独立分析结果与上方静态发现，产出完整的 SyntaxReport。\n"
+            f"**你自主发现的问题（尤其是静态工具未覆盖的语义/设计层面风险）是报告中最有价值的部分。**"
         )
     )
 
@@ -74,7 +80,8 @@ def run_syntax_analysis(
         flush=True,
     )
     structured_llm = llm.with_structured_output(SyntaxReport)
-    result = structured_llm.invoke([SystemMessage(content=SYNTAX_PROMPT), user_msg])
+    invoke_cfg = {"callbacks": callbacks} if callbacks else {}
+    result = structured_llm.invoke([SystemMessage(content=SYNTAX_PROMPT), user_msg], config=invoke_cfg)
     print(
         f"    [syntax] 语法分析完成，质量评分 {result.quality_score}/100，"
         f"发现 {len(result.findings)} 个问题",

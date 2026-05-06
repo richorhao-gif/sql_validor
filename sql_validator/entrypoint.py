@@ -472,7 +472,10 @@ def run_validation(request: ValidationRequest) -> ValidationResult:
     print("    [entrypoint] 启动并行分析（变更校验 + 语法质量）…", flush=True)
     with ThreadPoolExecutor(max_workers=2) as pool:
         future_react = pool.submit(_run_react_stream, agent, task_message, invoke_config)
-        future_syntax = pool.submit(run_syntax_analysis, sql_files, llm)
+        future_syntax = pool.submit(
+            run_syntax_analysis, sql_files, llm,
+            [langfuse_cb] if langfuse_cb else None,
+        )
 
         final_state = future_react.result()   # 等待 ReAct 完成（带进度输出）
         try:
