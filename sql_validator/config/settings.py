@@ -50,13 +50,25 @@ class Settings(BaseSettings):
     )
 
     # ── Runtime ────────────────────────────────────────────────────────────
-    max_sql_files: int = Field(
-        default=20,
-        ge=1,
-        le=100,
-        description="单次发版最大 SQL 文件数",
+    max_sql_files: int | None = Field(
+        default=None,
+        description="单次发版最大 SQL 文件数，None 表示不限制",
     )
     output_dir: str = Field(default="./reports", description="MD 报告输出目录")
+
+    # ── CODING 仓库 ────────────────────────────────────────────────────────
+    coding_repo_url: str = Field(
+        default="https://e.coding.net/g-ttsu8985/DLH/dp-dataasset-sql",
+        description="CODING 仓库 URL，格式 https://e.coding.net/{team}/{project}/{repo}",
+    )
+    coding_branch: str = Field(
+        default="develop",
+        description="要读取的分支名",
+    )
+    coding_token: str = Field(
+        default="",
+        description="CODING Personal Access Token，用于调用 OpenAPI",
+    )
 
     # ── Observability: Langfuse ────────────────────────────────────────────
     langfuse_public_key: str = Field(default="", description="Langfuse Public Key")

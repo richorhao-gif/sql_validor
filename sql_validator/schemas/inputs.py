@@ -8,6 +8,10 @@ class SQLFile(BaseModel):
 
     filename: str = Field(description="文件名（必须以 .sql 结尾）")
     content: str = Field(min_length=1, description="SQL 文件内容")
+    developer: str = Field(
+        default="",
+        description="开发者姓名（从 CODING 文件名自动解析，或手动填写）",
+    )
 
     @field_validator("filename")
     @classmethod
@@ -48,9 +52,9 @@ class ValidationRequest(BaseModel):
             raise ValueError(f"存在重复的文件名: {duplicates}")
         return self
 
-    def check_file_count(self, max_files: int) -> None:
+    def check_file_count(self, max_files: int | None) -> None:
         """业务层文件数量校验（需从 Settings 传入上限）。"""
-        if len(self.sql_files) > max_files:
+        if max_files is not None and len(self.sql_files) > max_files:
             raise ValueError(
                 f"单次发版文件数超过上限（{len(self.sql_files)} > {max_files}），"
                 "请拆分为多次发版"
