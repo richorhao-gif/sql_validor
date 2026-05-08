@@ -11,8 +11,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-# 文件名格式:  YYYYMMDD_开发者_#编号_描述.sql
-_DEVELOPER_RE = re.compile(r"^\d{8}_(.+?)_#\d+")
+# 文件名格式:
+#   旧格式: YYYYMMDD_开发者_#编号_描述.sql
+#   新格式: YYYYMMDD_开发者_coding#编号_描述.sql
+_DEVELOPER_RE = re.compile(r"^\d{8}_(.+?)_(?:coding)?#\d+")
 
 
 def parse_developer_from_filename(filename: str) -> str:

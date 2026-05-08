@@ -185,7 +185,7 @@ def _api_call(api_base: str, token: str, payload: dict) -> dict:
         api_base,
         data=body,
         headers={
-            "Authorization": f"token {token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         },
         method="POST",
