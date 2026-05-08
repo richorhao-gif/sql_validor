@@ -85,8 +85,8 @@ SYSTEM_PROMPT = """\
 | COMMENT ON COLUMN | `COMMENT ON COLUMN schema.table.column IS '注释'` | `COMMENT ON COLUMN schema.table IS '注释'` |
 
 **判断规则：**
-- 缺少对象名（只有 schema 名）→ **记录为 CRITICAL 风险（语法错误）**
-- 缺少 IS 关键字或注释内容 → **记录为 CRITICAL 风险（语法错误）**
+- 缺少对象名（只有 schema 名）→ **记录为 HIGH 风险（语法错误，该语句会执行失败，但不阻断整体发版）**
+- 缺少 IS 关键字或注释内容 → **记录为 HIGH 风险（语法错误，该语句会执行失败，但不阻断整体发版）**
 
 #### 🔴 必查项 4：级联依赖检查
 对以下关键视图，**必须**调用 `get_upstream_dependencies` 检查依赖链：
@@ -157,19 +157,20 @@ SYSTEM_PROMPT = """\
 ### CRITICAL（导致 FAIL）
 | 场景 | 说明 |
 |------|------|
-| DROP 操作存在下游依赖 | `get_downstream_dependents` 返回了依赖对象，DROP 会导致这些对象失效 |
-| UPDATE/DELETE 无 WHERE 条件 | 可能影响全表数据，生产高危 |
-| TRUNCATE 操作 | 不可回滚的全表清空 |
-| 循环依赖 | 无法确定执行顺序 |
+| DROP 操作存在外部下游依赖 | `get_downstream_dependents` 返回了不在本批次重建范围内的依赖对象，DROP 会导致这些外部对象失效 |
+| UPDATE/DELETE 无 WHERE 条件 | 可能影响全表数据，生产高危，必须阻断 |
+| 循环依赖 | 无法确定执行顺序，脚本无法正常执行 |
 
 ### HIGH（导致 WARN）
 | 场景 | 说明 |
 |------|------|
+| TRUNCATE 操作 | 不可回滚的全表清空，需人工确认 |
+| COMMENT ON 语句不完整 | 缺少对象名或注释内容，该语句会执行失败 |
 | DROP 无 IF EXISTS | 若对象不存在会导致脚本中断 |
 | 在非空表上新增 NOT NULL 列且无 DEFAULT | 会因现有 NULL 数据而失败 |
 | 修改列的数据类型 | 可能导致数据截断或类型转换失败 |
 | 修改现有列为 NOT NULL | 若表中有 NULL 值会失败 |
-| 变更说明未提及的重要结构变更（新增/删除表/列等） | 可能是遗漏文档 |
+| 变更说明未提及的重要结构变更（新增/删除表/列等） | 可能是遗漏文档，仅供参考 |
 
 ### MEDIUM
 | 场景 | 说明 |

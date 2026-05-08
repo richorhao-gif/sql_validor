@@ -140,8 +140,18 @@ def _run_task(task_id: str, payload: dict) -> None:
             }
 
         except Exception as exc:
+            err_str = str(exc)
             task["status"] = "error"
-            task["error"] = str(exc)
+            task["error"] = err_str
+            # 提取人类可读的错误类型标签，方便前端识别
+            if "429" in err_str or "insufficient_quota" in err_str or "exceeded" in err_str.lower():
+                task["error_type"] = "quota_exceeded"
+            elif "401" in err_str or "Authentication" in err_str or "api_key" in err_str.lower():
+                task["error_type"] = "auth_error"
+            elif "timeout" in err_str.lower() or "Timeout" in err_str:
+                task["error_type"] = "timeout"
+            else:
+                task["error_type"] = "unknown"
             log_q.put(f"[ERROR] {exc}")
         finally:
             sys.stdout = original
@@ -246,7 +256,12 @@ async def stream_logs(task_id: str):
                     None, lambda: log_q.get(block=True, timeout=0.5)
                 )
                 if item is _DONE_SENTINEL:
-                    payload = json.dumps({"type": "done", "status": task["status"]})
+                    payload = json.dumps({
+                        "type": "done",
+                        "status": task["status"],
+                        "error": task.get("error", ""),
+                        "error_type": task.get("error_type", ""),
+                    })
                     yield f"data: {payload}\n\n"
                     break
                 text = str(item)

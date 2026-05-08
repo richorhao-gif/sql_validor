@@ -1061,7 +1061,20 @@ function _startStream() {
         _appendLog('✔ 分析完成，正在加载报告…', 'done');
         setTimeout(_fetchReport, 600);
       } else {
-        _appendLog('✘ 审查失败，请检查终端日志', 'err');
+        const errType = msg.error_type || '';
+        const errRaw  = msg.error   || '未知错误';
+        let friendly = '';
+        if (errType === 'quota_exceeded') {
+          friendly = '❌ API 配额已耗尽（Error 429）— 请检查阿里云 / OpenAI 账户余额或升级套餐后重试';
+        } else if (errType === 'auth_error') {
+          friendly = '❌ API 密钥无效或未授权 — 请检查 .env 中的 LLM_API_KEY';
+        } else if (errType === 'timeout') {
+          friendly = '❌ LLM 请求超时 — 可在 .env 中增大 LLM_TIMEOUT 后重试';
+        } else {
+          friendly = `❌ 审查失败：${errRaw.slice(0, 120)}`;
+        }
+        _appendLog(friendly, 'err');
+        _showErrBanner(friendly, errRaw);
       }
     }
   };
@@ -1132,6 +1145,34 @@ function _logCls(t) {
    ═══════════════════════════════════════════════════════════════════════════ */
 function _startTimer() { t0 = Date.now(); tmrId = setInterval(() => { document.getElementById('s-time').textContent = Math.floor((Date.now()-t0)/1000); }, 1000); }
 function _stopTimer()  { clearInterval(tmrId); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Error banner (process view)
+   ═══════════════════════════════════════════════════════════════════════════ */
+function _showErrBanner(friendly, raw) {
+  // Remove old banner if any
+  const old = document.getElementById('err-banner'); if (old) old.remove();
+  const banner = document.createElement('div');
+  banner.id = 'err-banner';
+  banner.style.cssText = `
+    margin: 12px 18px; padding: 13px 16px;
+    background: rgba(244,63,94,.1); border: 1px solid rgba(244,63,94,.35);
+    border-radius: 10px; color: #f87171; font-size: 13px; line-height: 1.6;
+    animation: fadeUp .3s ease;
+  `;
+  banner.innerHTML = `
+    <div style="font-weight:600;margin-bottom:4px">${esc(friendly)}</div>
+    <details style="margin-top:6px">
+      <summary style="cursor:pointer;font-size:11.5px;color:var(--text-muted)">查看原始错误</summary>
+      <pre style="margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--text-muted);white-space:pre-wrap;word-break:break-all">${esc(raw)}</pre>
+    </details>
+    <div style="margin-top:10px;display:flex;gap:8px">
+      <button class="btn btn-outline" style="font-size:12px" onclick="doReset()">↺ 重新提交</button>
+    </div>
+  `;
+  const logOut = document.getElementById('log-out');
+  logOut.parentNode.insertBefore(banner, logOut);
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    Fetch & render report

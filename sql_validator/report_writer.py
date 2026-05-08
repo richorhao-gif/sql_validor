@@ -98,13 +98,18 @@ def write_change_report(
 
     callout_type = {"PASS": "TIP", "WARN": "WARNING", "FAIL": "CAUTION"}.get(report.verdict, "NOTE")
 
+    # 预计算有问题文件数
+    _bad_file_set = {f["filename"] for f in sql_files if _file_has_change_issues(f["filename"], report.findings)}
+    _total_bad_count = len(_bad_file_set)
+
     lines: list[str] = [
         "# SQL 脚本变更说明对比报告",
         "",
         "| 字段 | 值 |",
         "|:---|:---|",
         f"| 📅 生成时间 | {ts_display} |",
-        f"| 📁 SQL 文件数 | {len(sql_files)} |",
+        f"| 📁 脚本总数 | {len(sql_files)} |",
+        f"| ❌ 有问题脚本数 | {_total_bad_count} / {len(sql_files)} |",
         f"| 🏁 总体判定 | {verdict_icon} **{report.verdict}** |",
         f"| {risk_icon} 风险等级 | **{report.risk_level}** |",
         f"| 🤖 LLM 置信度 | {confidence_str} |",
@@ -169,47 +174,16 @@ def write_change_report(
         lines += ["## 执行概要", ""]
         lines += [report.execution_overview or report.summary, "", "---", ""]
 
-    # ── 按发版者详情 ──────────────────────────────────────────────────────────
-    lines += ["## 发版人员详情", ""]
-    for dev, filenames in dev_files_map.items():
-        dev_findings = [
-            f for f in report.findings
-            if f.file in filenames or f.file == "all"
-        ]
-        lines += [f"### 👤 {dev}（{len(filenames)} 个文件）", ""]
-        for fname in filenames:
-            file_findings = [f for f in report.findings if f.file == fname]
-            bad = _file_has_change_issues(fname, report.findings)
-            status_icon = "❌ 有问题" if bad else "✅ 无问题"
-            finding_cnt = len(file_findings)
-            lines += [f"#### 📄 `{fname}` — {status_icon}", ""]
-            if not file_findings:
-                lines += ["该文件无发现问题。", ""]
-            else:
-                lines += [
-                    "| # | 严重度 | 类别 | 描述 |",
-                    "|:---:|:---:|:---|:---|",
-                ]
-                for i, ff in enumerate(file_findings, 1):
-                    icon = _SEV_ICON.get(ff.severity, "")
-                    desc_short = ff.description[:100] + ("…" if len(ff.description) > 100 else "")
-                    lines.append(f"| {i} | {icon} {ff.severity} | {ff.category} | {desc_short} |")
-                lines.append("")
-                for i, ff in enumerate(file_findings, 1):
-                    lines += [
-                        f"**F{i} · [{ff.severity}] {ff.category}**",
-                        "",
-                        ff.description,
-                    ]
-                    if ff.suggestion:
-                        lines += ["", f"> [!TIP]", f"> **建议：** {ff.suggestion}"]
-                    lines.append("")
-
-        # 文件级 "all" 通用问题挂在该开发者的最后一个文件后面
-        # （若已在 per-file 里展示则不重复）
-        lines += [""]
-
-    lines += ["---", ""]
+    # ── 高风险 Findings 汇总（CRITICAL / HIGH only）────────────────────────────
+    critical_high = [f for f in report.findings if f.severity in ("CRITICAL", "HIGH")]
+    if critical_high:
+        lines += ["## ⚠️ 高风险问题汇总", ""]
+        lines += ["| # | 文件 | 严重度 | 类别 | 描述 |", "|:---:|:---|:---:|:---|:---|"]
+        for i, ff in enumerate(critical_high, 1):
+            icon = _SEV_ICON.get(ff.severity, "")
+            desc_short = ff.description[:120] + ("…" if len(ff.description) > 120 else "")
+            lines.append(f"| {i} | `{ff.file}` | {icon} {ff.severity} | {ff.category} | {desc_short} |")
+        lines += ["", "---", ""]
 
     # ── 变更覆盖情况 ──────────────────────────────────────────────────────────
     confirmed_n = len(report.confirmed_changes)
@@ -361,13 +335,16 @@ def write_syntax_report(
     score_icon    = "🟢" if score >= 85 else ("🟡" if score >= 60 else "🔴")
     score_callout = "TIP" if score >= 85 else ("WARNING" if score >= 60 else "CAUTION")
 
+    _syntax_bad_count = sum(1 for fr in report.file_results if fr.error_count > 0 or fr.warning_count > 0)
+
     lines: list[str] = [
         "# SQL 脚本语法与质量分析报告",
         "",
         "| 字段 | 值 |",
         "|:---|:---|",
         f"| 📅 生成时间 | {ts_display} |",
-        f"| 📁 分析文件数 | {len(report.file_results)} |",
+        f"| 📁 脚本总数 | {len(report.file_results)} |",
+        f"| ❌ 有问题文件数 | {_syntax_bad_count} / {len(report.file_results)} |",
         f"| {score_icon} 综合质量评分 | **{score} / 100** |",
         f"| 🔴 ERROR 数 | **{len(errors)}** |",
         f"| 🟡 WARNING 数 | **{len(warnings)}** |",

@@ -133,16 +133,16 @@ SYNTAX_PROMPT = """\
 
 对所有操作的 da 层表（`da.*` schema 或 `da_*` 前缀）：
 1. 是否有 `COMMENT ON TABLE da.xxx IS '...'`：
-   - 缺少：WARNING（rule=`RULE4.6_MISSING_TABLE_COMMENT`）
+   - 缺少：INFO（rule=`RULE4.6_MISSING_TABLE_COMMENT`）
 2. 主要字段是否有 `COMMENT ON COLUMN`：
-   - 无任何字段注释：WARNING（rule=`RULE4.6_MISSING_COLUMN_COMMENT`）
+   - 无任何字段注释：INFO（rule=`RULE4.6_MISSING_COLUMN_COMMENT`）
 3. 可通过 `query_pg_catalog` 查询 `pg_description` 确认现有对象注释状况。
 
 ### RULE4.7 — da 层中文视图及权限穿透
 
 对所有在 da 层创建或操作的表/视图，检查：
 1. 是否有对应的中文视图（通常命名为 `v_cn_*` 或视图名包含中文）：
-   - 无中文视图：WARNING（rule=`RULE4.7_MISSING_CHINESE_VIEW`）
+   - 无中文视图：INFO（rule=`RULE4.7_MISSING_CHINESE_VIEW`，供参考）
 2. 中文视图是否声明了权限穿透（`WITH (security_invoker = true)` 或 `security_invoker`）：
    - 缺少权限穿透：ERROR（rule=`RULE4.7_MISSING_SECURITY_INVOKER`，权限放大风险）
 
