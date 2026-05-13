@@ -10,6 +10,7 @@ core/sql_parser.py
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import sqlglot
@@ -82,6 +83,12 @@ def parse_sql_file(file: dict[str, Any]) -> tuple[ParsedScript, list[SyntaxIssue
             stmt_errors = []
 
         for err in stmt_errors:
+            # sqlglot bug: COMMENT ON VIEW schema.name IS 'comment' 被错误解析，
+            # this 只取到 schema (Identifier)，expression 为 None，导致误报 "expression missing"
+            # 实际 SQL 语法完全正确，跳过此误报
+            if isinstance(stmt, exp.Comment) and stmt.args.get("kind") == "VIEW":
+                continue
+
             syntax_error_count += 1
             try:
                 snippet = stmt.sql(dialect="postgres")[:300]
@@ -100,7 +107,7 @@ def parse_sql_file(file: dict[str, Any]) -> tuple[ParsedScript, list[SyntaxIssue
             )
 
         # 提取结构化信息
-        info = _extract_statement_info(stmt, i, filename)
+        info = _extract_statement_info(stmt, i, filename, content)
         if info:
             statements.append(info)
 
@@ -151,7 +158,7 @@ def _extract_table_name(table_expr: exp.Expression | None) -> tuple[str, str]:
 
 
 def _extract_statement_info(
-    stmt: exp.Expression, index: int, filename: str
+    stmt: exp.Expression, index: int, filename: str, content: str = ""
 ) -> StatementInfo | None:
     """将单条 sqlglot 语句转为 StatementInfo，无法识别时返回 None。"""
     sql_snippet = stmt.sql(dialect="postgres")[:300]
@@ -276,6 +283,48 @@ def _extract_statement_info(
             index=index, statement_type="DCL", operation="REVOKE",
             object_type="UNKNOWN", object_schema="", object_name="",
             full_object_name="", raw_sql_snippet=sql_snippet,
+        )
+
+    # ── COMMENT ───────────────────────────────────────────────────────────────
+    if isinstance(stmt, exp.Comment):
+        kind = str(stmt.args.get("kind", "TABLE")).upper()
+        this = stmt.args.get("this")
+        schema, name = "", ""
+
+        if isinstance(this, exp.Table):
+            # COMMENT ON TABLE/VIEW schema.name — sqlglot 正确解析
+            schema, name = _extract_table_name(this)
+        elif isinstance(this, exp.Column):
+            # COMMENT ON COLUMN schema.table.column — this 是 Column 对象
+            col_table = this.args.get("table")
+            if isinstance(col_table, exp.Table):
+                schema, name = _extract_table_name(col_table)
+            else:
+                col_str = str(this)
+                parts = col_str.split(".")
+                if len(parts) >= 2:
+                    schema, name = parts[0], parts[1]
+        elif isinstance(this, exp.Identifier):
+            # sqlglot bug: COMMENT ON VIEW schema.name 中 this 只取到 schema
+            # 从原始文件内容中用正则提取完整对象名和 snippet
+            schema = this.name
+            name = ""
+            if content:
+                # 匹配 COMMENT ON VIEW schema.name IS '...' 或 COMMENT ON VIEW schema."name" IS '...'
+                m = re.search(
+                    rf"COMMENT\s+ON\s+VIEW\s+{re.escape(schema)}\.(\S+)\s+IS\s+.+",
+                    content, re.IGNORECASE
+                )
+                if m:
+                    name = m.group(1).strip('"')
+                    # 用原始文本作为 snippet，避免 sqlglot 渲染丢失信息
+                    sql_snippet = m.group(0)[:300]
+
+        full_name = f"{schema}.{name}" if schema and name else (schema if schema else "")
+        return StatementInfo(
+            index=index, statement_type="DDL", operation="COMMENT",
+            object_type=kind, object_schema=schema, object_name=name,
+            full_object_name=full_name, raw_sql_snippet=sql_snippet,
         )
 
     return None  # 未知语句类型，跳过
