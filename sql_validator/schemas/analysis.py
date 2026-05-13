@@ -59,6 +59,10 @@ class ParsedScript(BaseModel):
         description="本文件 INSERT/UPDATE/DELETE/TRUNCATE 写入的对象全限定名列表",
     )
     syntax_error_count: int = 0
+    unrecognized_count: int = Field(
+        default=0,
+        description="sqlglot 能解析但无法提取结构信息的语句数量；>0 表示解析结果可能不完整",
+    )
     intent_summary: str = Field(
         default="", description="LLM 填充的意图摘要（当前架构中保留字段，默认为空）"
     )

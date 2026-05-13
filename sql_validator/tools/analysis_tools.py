@@ -38,24 +38,49 @@ def create_analysis_tools(sql_files: list[dict[str, Any]]) -> list[BaseTool]:
         对本次发版的所有 SQL 文件进行 AST 解析，返回每个文件的结构化变更清单。
 
         返回字段说明：
-          - filename          : 文件名
-          - objects_created   : 本文件新建的对象（CREATE TABLE/VIEW/FOREIGN TABLE 等）
-          - objects_altered   : 本文件修改的对象（ALTER TABLE/VIEW）
-          - objects_dropped   : 本文件删除的对象（DROP TABLE/VIEW 等）
-          - objects_written   : 本文件写入数据的对象（INSERT/UPDATE/DELETE/TRUNCATE）
-          - objects_read      : 本文件读取的对象（SELECT FROM）
-          - statements        : 逐语句明细（操作类型、对象类型、目标对象全限定名）
-          - syntax_errors     : 语法错误列表（severity=ERROR）
-          - quality_warnings  : 代码质量警告（如无 WHERE 的 DML、缺少幂等保护等）
+          - filename               : 文件名
+          - parse_quality          : 解析质量 — "OK" | "DEGRADED" | "FAILED"
+              * OK       : 所有语句均被成功识别
+              * DEGRADED : 部分语句无法被解析器识别（unrecognized_count > 0），
+                           objects_* 列表可能不完整，**必须结合 raw_content 进行人工补充分析**
+              * FAILED   : 文件整体解析失败，objects_* 均为空，**必须完全依赖 raw_content**
+          - unrecognized_count     : sqlglot 解析到但无法提取结构信息的语句数量
+          - objects_created        : 本文件新建的对象（CREATE TABLE/VIEW/FOREIGN TABLE 等）
+          - objects_altered        : 本文件修改的对象（ALTER TABLE/VIEW）
+          - objects_dropped        : 本文件删除的对象（DROP TABLE/VIEW 等）
+          - objects_written        : 本文件写入数据的对象（INSERT/UPDATE/DELETE/TRUNCATE）
+          - objects_read           : 本文件读取的对象（SELECT FROM）
+          - statements             : 逐语句明细（操作类型、对象类型、目标对象全限定名）
+          - syntax_errors          : 语法错误列表（severity=ERROR）
+          - quality_warnings       : 代码质量警告（如无 WHERE 的 DML、缺少幂等保护等）
+          - raw_content            : 原始 SQL 全文，当 parse_quality 为 DEGRADED/FAILED 时
+                                     必须直接阅读此字段来补全对象清单
 
         **必须作为审查的第一步调用**，后续所有 DB 查询决策都基于此输出。
         注意：objects_created 中的对象是本次新建的，数据库中尚不存在，无需查询其结构。
+
+        ⚠️  parse_quality != "OK" 时的处理规则：
+            1. 阅读 raw_content，人工识别所有 CREATE/ALTER/DROP/DML 语句及其目标对象
+            2. 将人工识别的对象与 objects_* 列表合并，作为完整的变更清单
+            3. 后续 DB 查询必须覆盖合并后的完整清单，不得仅依赖 objects_* 字段
         """
         results = []
         for f in sql_files:
             script, issues = parse_sql_file(f)
+
+            # 计算解析质量
+            total_stmts = len(script.statements) + script.unrecognized_count
+            if script.syntax_error_count > 0 and total_stmts == 0:
+                parse_quality = "FAILED"
+            elif script.unrecognized_count > 0:
+                parse_quality = "DEGRADED"
+            else:
+                parse_quality = "OK"
+
             results.append({
                 "filename": script.filename,
+                "parse_quality": parse_quality,
+                "unrecognized_count": script.unrecognized_count,
                 "objects_created": script.objects_created,
                 "objects_altered": script.objects_altered,
                 "objects_dropped": script.objects_dropped,
@@ -68,6 +93,7 @@ def create_analysis_tools(sql_files: list[dict[str, Any]]) -> list[BaseTool]:
                 "quality_warnings": [
                     i.model_dump() for i in issues if i.severity != "ERROR"
                 ],
+                "raw_content": f.get("content", ""),
             })
         return json.dumps(results, ensure_ascii=False, indent=2)
 

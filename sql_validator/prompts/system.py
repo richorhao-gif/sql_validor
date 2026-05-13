@@ -38,6 +38,17 @@ SYSTEM_PROMPT = """\
 调用 `parse_sql_files()`，获取所有文件的结构化变更清单。
 **这是后续一切分析的基础，不允许跳过。**
 
+**⚠️  解析质量降级处理（必读）：**
+`parse_sql_files()` 结果中每个文件都包含 `parse_quality` 字段：
+- `"OK"`      — 正常使用 `objects_*` 和 `statements` 字段即可
+- `"DEGRADED"` — `unrecognized_count > 0`，说明部分语句 sqlglot 无法识别，
+  `objects_*` 列表**不完整**。必须直接阅读该文件的 `raw_content` 字段，
+  人工识别所有 CREATE/ALTER/DROP/DML 语句及目标对象，
+  与 `objects_*` 合并后作为完整变更清单，**后续所有 DB 查询必须覆盖合并结果**。
+- `"FAILED"`   — 文件整体解析失败，`objects_*` 均为空。
+  必须**完全依赖 `raw_content`** 进行分析，忽略所有 `objects_*`。
+  同时在报告中标注该文件因解析失败导致分析可信度下降。
+
 ### 第二步：计算执行顺序
 调用 `get_execution_order()`，确定文件执行顺序。
 如果存在循环依赖（`has_cycles: true`），立即记录为 CRITICAL 风险。

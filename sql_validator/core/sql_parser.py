@@ -71,9 +71,12 @@ def parse_sql_file(file: dict[str, Any]) -> tuple[ParsedScript, list[SyntaxIssue
 
     # ── 逐语句处理 ────────────────────────────────────────────────────────────
     statements: list[StatementInfo] = []
+    unrecognized_count = 0
 
     for i, stmt in enumerate(parsed_stmts):
         if stmt is None:
+            # sqlglot 完全无法解析该语句（返回 None），计入未识别
+            unrecognized_count += 1
             continue
 
         # sqlglot 解析告警（软错误）— 使用 error_messages() 方法而非不存在的 .errors 属性
@@ -106,10 +109,20 @@ def parse_sql_file(file: dict[str, Any]) -> tuple[ParsedScript, list[SyntaxIssue
                 )
             )
 
-        # 提取结构化信息
+        # 提取结构化信息：优先 AST，失败则正则兜底
         info = _extract_statement_info(stmt, i, filename, content)
         if info:
             statements.append(info)
+        else:
+            try:
+                sql_text = stmt.sql(dialect="postgres")
+            except Exception:  # noqa: BLE001
+                sql_text = ""
+            fallback = _regex_fallback_extract(sql_text, i, filename) if sql_text else None
+            if fallback:
+                statements.append(fallback)
+            else:
+                unrecognized_count += 1
 
         # 质量规则检查
         issues.extend(_check_quality_rules(stmt, filename))
@@ -135,6 +148,7 @@ def parse_sql_file(file: dict[str, Any]) -> tuple[ParsedScript, list[SyntaxIssue
         objects_read=objects_read,
         objects_written=objects_written,
         syntax_error_count=syntax_error_count,
+        unrecognized_count=unrecognized_count,
         intent_summary="",  # 由 LLM 填充
     )
     return script, issues
@@ -328,6 +342,68 @@ def _extract_statement_info(
         )
 
     return None  # 未知语句类型，跳过
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 私有辅助：正则兜底提取（AST 识别失败时使用）
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 每条规则：(pattern, operation, object_type, statement_type)
+_REGEX_PATTERNS: list[tuple[str, str, str, str]] = [
+    # DDL — CREATE
+    (r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(;]+)", "CREATE", "TABLE", "DDL"),
+    (r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?VIEW\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(;]+)", "CREATE", "VIEW", "DDL"),
+    (r"CREATE\s+(?:OR\s+REPLACE\s+)?FOREIGN\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([^\s(;]+)", "CREATE", "FOREIGN TABLE", "DDL"),
+    (r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:\w+\s+)?ON\s+([^\s(;]+)", "CREATE", "INDEX", "DDL"),
+    (r"CREATE\s+(?:OR\s+REPLACE\s+)?(?:TRUSTED\s+)?(?:PROCEDURE|FUNCTION)\s+([^\s(;]+)", "CREATE", "FUNCTION", "DDL"),
+    # DDL — ALTER
+    (r"ALTER\s+TABLE\s+([^\s;]+)", "ALTER", "TABLE", "DDL"),
+    (r"ALTER\s+VIEW\s+([^\s;]+)", "ALTER", "VIEW", "DDL"),
+    # DDL — DROP
+    (r"DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([^\s;]+)", "DROP", "TABLE", "DDL"),
+    (r"DROP\s+VIEW\s+(?:IF\s+EXISTS\s+)?([^\s;]+)", "DROP", "VIEW", "DDL"),
+    (r"DROP\s+FOREIGN\s+TABLE\s+(?:IF\s+EXISTS\s+)?([^\s;]+)", "DROP", "FOREIGN TABLE", "DDL"),
+    (r"DROP\s+INDEX\s+(?:IF\s+EXISTS\s+)?([^\s;]+)", "DROP", "INDEX", "DDL"),
+    (r"DROP\s+(?:PROCEDURE|FUNCTION)\s+(?:IF\s+EXISTS\s+)?([^\s(;]+)", "DROP", "FUNCTION", "DDL"),
+    # DML
+    (r"TRUNCATE\s+(?:TABLE\s+)?([^\s;,]+)", "TRUNCATE", "TABLE", "DML"),
+    (r"INSERT\s+INTO\s+([^\s(]+)", "INSERT", "TABLE", "DML"),
+    (r"UPDATE\s+([^\s]+)\s+SET", "UPDATE", "TABLE", "DML"),
+    (r"DELETE\s+FROM\s+([^\s;]+)", "DELETE", "TABLE", "DML"),
+]
+
+
+def _regex_fallback_extract(
+    sql_text: str, index: int, filename: str
+) -> StatementInfo | None:
+    """
+    用正则从 SQL 文本中尝试提取结构化信息。
+    仅在 sqlglot AST 提取失败时作为兜底使用，精度低于 AST。
+    """
+    text = sql_text.strip()
+    for pattern, operation, obj_type, stmt_type in _REGEX_PATTERNS:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            raw_name = m.group(1).strip().rstrip(";").strip('"')
+            parts = raw_name.split(".")
+            if len(parts) >= 2:
+                schema = parts[0].strip('"')
+                name = parts[1].strip('"')
+            else:
+                schema, name = "public", raw_name
+            if not name:
+                continue
+            return StatementInfo(
+                index=index,
+                statement_type=stmt_type,
+                operation=operation,
+                object_type=obj_type,
+                object_schema=schema,
+                object_name=name,
+                full_object_name=f"{schema}.{name}",
+                raw_sql_snippet=text[:300],
+            )
+    return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
